@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Website Status Checker</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>Website Status Checker</h1>
+  <p class="subtitle">Check if websites are up, down, redirecting, or blocked by Cloudflare.</p>
+</header>
+
+<main class="container">
+  <section class="panel">
+    <label for="urls" class="label">URLs (one per line)</label>
+    <textarea id="urls" placeholder="example.com&#10;https://google.com&#10;cloudflare.com"></textarea>
+
+    <div class="options">
+      <label class="check"><input type="checkbox" id="optVariations" /> Check domain variations (4 formats)</label>
+      <label class="check"><input type="checkbox" id="optScrape" /> Scrape page text (15-20 words)</label>
+    </div>
+
+    <div class="actions">
+      <button id="checkBtn" class="btn primary">Check Status</button>
+      <button id="clearBtn" class="btn danger" title="Clear all data">
+        <span class="bin">&#x1F5D1;</span>
+      </button>
+      <span id="spinner" class="spinner hidden"></span>
+      <span id="timer" class="timer"></span>
+    </div>
+
+    <div id="warning" class="warning hidden">Warning: checking 200+ URLs may take a while.</div>
+    <div id="dupNotice" class="notice hidden"></div>
+  </section>
+
+  <section id="resultsPanel" class="panel hidden">
+    <div class="summary">
+      <canvas id="donut" width="220" height="220"></canvas>
+      <div id="legend" class="legend"></div>
+    </div>
+    <div id="tables"></div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
