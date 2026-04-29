@@ -17,12 +17,12 @@
   const STORAGE_KEY = 'website-checker-state-v1';
 
   const CATEGORIES = [
-    { key: 'up', label: 'Up', color: '#3fb950' },
-    { key: 'redirect-up', label: 'Redirect Up', color: '#56d364' },
-    { key: 'redirect', label: 'Redirect', color: '#d29922' },
-    { key: 'redirect-down', label: 'Redirect Down', color: '#ff7b72' },
-    { key: 'cloudflare', label: 'Cloudflare', color: '#f78166' },
-    { key: 'down', label: 'Down', color: '#f85149' }
+    { key: 'up', label: 'Up', color: '#ffffff' },
+    { key: 'redirect-up', label: 'Redirect Up', color: '#d4d4d4' },
+    { key: 'redirect', label: 'Redirect', color: '#a3a3a3' },
+    { key: 'redirect-down', label: 'Redirect Down', color: '#737373' },
+    { key: 'cloudflare', label: 'Cloudflare', color: '#525252' },
+    { key: 'down', label: 'Down', color: '#2a2a2a' }
   ];
   const CAT_COLOR = Object.fromEntries(CATEGORIES.map(c => [c.key, c.color]));
   const CAT_LABEL = Object.fromEntries(CATEGORIES.map(c => [c.key, c.label]));
@@ -235,13 +235,13 @@
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
 
-    ctx.fillStyle = '#e6edf3';
+    ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = 'bold 22px -apple-system, Segoe UI, sans-serif';
     ctx.fillText(String(total), cx, cy - 6);
     ctx.font = '11px -apple-system, Segoe UI, sans-serif';
-    ctx.fillStyle = '#8b949e';
+    ctx.fillStyle = '#9a9a9a';
     ctx.fillText('total', cx, cy + 14);
   }
 
@@ -267,7 +267,7 @@
     const title = document.createElement('h3');
     title.className = 'cat-title';
     title.innerHTML = `<span class="dot" style="background:${cat.color}"></span>
-      ${cat.label} <span class="count" style="color:#8b949e;font-weight:400;font-size:13px">(${items.length})</span>`;
+      ${cat.label} <span class="count" style="color:#9a9a9a;font-weight:400;font-size:13px">(${items.length})</span>`;
     wrap.appendChild(title);
 
     const table = document.createElement('table');
@@ -292,14 +292,14 @@
       const tdStatus = document.createElement('td');
       const statusText = r.status ? r.status : (r.error ? 'ERR' : '—');
       tdStatus.innerHTML = `<span class="badge ${r.category}">${CAT_LABEL[r.category] || r.category}</span>
-        <div class="count" style="color:#8b949e;font-size:11.5px;margin-top:3px;">${statusText}${r.error ? ' · ' + escapeHtml(r.error) : ''}</div>`;
+        <div class="count" style="color:#9a9a9a;font-size:11.5px;margin-top:3px;">${statusText}${r.error ? ' · ' + escapeHtml(r.error) : ''}</div>`;
       tr.appendChild(tdStatus);
 
       const tdFinal = document.createElement('td');
       if (r.finalUrl && r.finalUrl !== r.url) {
         tdFinal.innerHTML = `<a href="${escapeAttr(r.finalUrl)}" target="_blank" rel="noopener">${escapeHtml(r.finalUrl)}</a>`;
       } else {
-        tdFinal.innerHTML = `<span style="color:#8b949e">—</span>`;
+        tdFinal.innerHTML = `<span style="color:#9a9a9a">—</span>`;
       }
       tr.appendChild(tdFinal);
 
@@ -314,7 +314,7 @@
           a.href = v.url;
           a.target = '_blank';
           a.rel = 'noopener';
-          const color = CAT_COLOR[v.category] || '#8b949e';
+          const color = CAT_COLOR[v.category] || '#9a9a9a';
           a.innerHTML = `<span class="vdot" style="background:${color}"></span>${escapeHtml(shortVariant(v.url))}`;
           a.title = `${v.url}\nStatus: ${v.status || 'ERR'} (${CAT_LABEL[v.category] || v.category})`;
           div.appendChild(a);
@@ -327,7 +327,7 @@
         const tdScrape = document.createElement('td');
         tdScrape.innerHTML = r.scraped
           ? `<span class="scraped">${escapeHtml(r.scraped)}</span>`
-          : `<span style="color:#8b949e">—</span>`;
+          : `<span style="color:#9a9a9a">—</span>`;
         tr.appendChild(tdScrape);
       }
 
