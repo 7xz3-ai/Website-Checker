@@ -12,37 +12,37 @@
   const checkedCountEl = $('checkedCount');
   const warningEl = $('warning');
   const dupNotice = $('dupNotice');
-  const liveResultsPanel = $('liveResultsPanel');
-  const liveList = $('liveList');
-  const tablesPanel = $('tablesPanel');
-  const tablesGrid = $('tablesGrid');
-  const breakdownPanel = $('breakdownPanel');
-  const breakdownChips = $('breakdownChips');
+  const resultsCard = $('resultsCard');
+  const stackBar = $('stackBar');
+  const stackChips = $('stackChips');
+  const viewToggle = $('viewToggle');
+  const filterHint = $('filterHint');
+  const streamView = $('streamView');
+  const groupedView = $('groupedView');
+  const chartView = $('chartView');
   const donut = $('donut');
   const legend = $('legend');
-  const filterPills = $('filterPills');
   const howBtn = $('howBtn');
   const howModal = $('howModal');
   const howClose = $('howClose');
 
-  const STORAGE_KEY = 'omair-checker-state-v2';
+  const STORAGE_KEY = 'site-checker-state-v3';
 
   const CATEGORIES = [
-    { key: 'up',            label: 'Up',            color: '#10b981' },
-    { key: 'redirect-up',   label: 'Redirect Up',   color: '#14b8a6' },
-    { key: 'redirect-down', label: 'Redirect Down', color: '#f97316' },
-    { key: 'unique',        label: 'Unique',        color: '#8b5cf6' },
-    { key: 'cloudflare',    label: 'Cloudflare',    color: '#a855f7' },
-    { key: 'down',          label: 'Down',          color: '#ef4444' }
+    { key: 'up',            label: 'Up',            short: 'Up',     color: '#22d172' },
+    { key: 'redirect-up',   label: 'Redirect Up',   short: 'R-Up',   color: '#14d2c4' },
+    { key: 'redirect-down', label: 'Redirect Down', short: 'R-Down', color: '#ff8a3d' },
+    { key: 'unique',        label: 'Unique',        short: 'Unique', color: '#a78bfa' },
+    { key: 'cloudflare',    label: 'Cloudflare',    short: 'CF',     color: '#c084fc' },
+    { key: 'down',          label: 'Down',          short: 'Down',   color: '#ff5470' }
   ];
-  const CAT_COLOR = Object.fromEntries(CATEGORIES.map(c => [c.key, c.color]));
   const CAT_LABEL = Object.fromEntries(CATEGORIES.map(c => [c.key, c.label]));
-  const SHORT_LABEL = { up: 'Up', 'redirect-up': 'Redirect Up', 'redirect-down': 'Redirect Down', unique: 'Unique', cloudflare: 'CF', down: 'Down' };
 
   const state = {
     results: [],
     elapsedMs: 0,
-    activeFilter: null
+    activeFilter: null,
+    view: 'stream'
   };
 
   function saveState() {
@@ -51,15 +51,15 @@
         urlsText: urlsEl.value,
         opts: getOpts(),
         results: state.results,
-        elapsedMs: state.elapsedMs
+        elapsedMs: state.elapsedMs,
+        view: state.view
       }));
     } catch (e) {}
   }
   function loadState() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw);
+      return raw ? JSON.parse(raw) : null;
     } catch (e) { return null; }
   }
   function getOpts() {
@@ -81,32 +81,27 @@
         optUnique.checked = !!s.opts.unique;
         optAdvanced.checked = !!s.opts.advanced;
       }
+      if (s.view) state.view = s.view;
       if (Array.isArray(s.results) && s.results.length) {
         state.results = s.results;
         state.elapsedMs = s.elapsedMs || 0;
         renderAll();
       }
     }
+    setView(state.view);
     updateUrlCount();
     updateWarning();
   }
 
-  urlsEl.addEventListener('input', () => {
-    updateUrlCount();
-    updateWarning();
-    saveState();
-  });
+  urlsEl.addEventListener('input', () => { updateUrlCount(); updateWarning(); saveState(); });
   [optRedirects, optVar, optUnique, optAdvanced].forEach(el => el.addEventListener('change', saveState));
 
   function updateUrlCount() {
-    const n = parseUrlLines(urlsEl.value).length;
-    urlCountEl.textContent = String(n);
+    urlCountEl.textContent = String(parseUrlLines(urlsEl.value).length);
   }
   function updateWarning() {
-    const n = parseUrlLines(urlsEl.value).length;
-    warningEl.classList.toggle('hidden', n < 200);
+    warningEl.classList.toggle('hidden', parseUrlLines(urlsEl.value).length < 200);
   }
-
   function parseUrlLines(text) {
     return (text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   }
@@ -119,9 +114,8 @@
     }
     return { unique, dups };
   }
-
   function formatElapsed(ms) {
-    if (!ms && ms !== 0) return '';
+    if (ms == null) return '0.0s';
     const s = ms / 1000;
     if (s < 60) return `${s.toFixed(1)}s`;
     const m = s / 60;
@@ -130,15 +124,11 @@
   }
 
   let timerInterval = null;
-  function startTimer(startTime) {
+  function startTimer(start) {
     timerEl.textContent = '0.0s';
-    timerInterval = setInterval(() => {
-      timerEl.textContent = formatElapsed(Date.now() - startTime);
-    }, 100);
+    timerInterval = setInterval(() => { timerEl.textContent = formatElapsed(Date.now() - start); }, 100);
   }
-  function stopTimer() {
-    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-  }
+  function stopTimer() { if (timerInterval) { clearInterval(timerInterval); timerInterval = null; } }
 
   checkBtn.addEventListener('click', async () => {
     const lines = parseUrlLines(urlsEl.value);
@@ -147,20 +137,19 @@
     if (dups > 0) {
       dupNotice.textContent = `Removed ${dups} duplicate URL${dups === 1 ? '' : 's'}.`;
       dupNotice.classList.remove('hidden');
-    } else {
-      dupNotice.classList.add('hidden');
-    }
+    } else dupNotice.classList.add('hidden');
 
     state.results = [];
     state.activeFilter = null;
-    liveResultsPanel.classList.remove('hidden');
-    tablesPanel.classList.add('hidden');
-    breakdownPanel.classList.add('hidden');
-    liveList.innerHTML = '';
+    resultsCard.classList.remove('hidden');
+    streamView.innerHTML = ''; groupedView.innerHTML = '';
+    stackBar.innerHTML = ''; stackChips.innerHTML = '';
     checkedCountEl.textContent = '0';
 
     checkBtn.disabled = true;
-    checkBtn.textContent = 'Checking...';
+    const origLabel = checkBtn.querySelector('span:last-child').textContent;
+    checkBtn.querySelector('span:last-child').textContent = 'Checking...';
+
     const start = Date.now();
     startTimer(start);
 
@@ -180,7 +169,6 @@
       timerEl.textContent = formatElapsed(elapsed);
       state.results = data.results || [];
       state.elapsedMs = elapsed;
-      checkedCountEl.textContent = String(state.results.length);
       renderAll();
       saveState();
     } catch (e) {
@@ -188,7 +176,7 @@
       alert('Check failed: ' + e.message);
     } finally {
       checkBtn.disabled = false;
-      checkBtn.textContent = 'Check Status';
+      checkBtn.querySelector('span:last-child').textContent = origLabel;
     }
   });
 
@@ -196,62 +184,63 @@
     if (!confirm('Clear all URLs, results, and settings?')) return;
     localStorage.removeItem(STORAGE_KEY);
     urlsEl.value = '';
-    optRedirects.checked = true;
-    optVar.checked = false;
-    optUnique.checked = false;
-    optAdvanced.checked = false;
-    timerEl.textContent = '0s';
+    optRedirects.checked = true; optVar.checked = false;
+    optUnique.checked = false; optAdvanced.checked = false;
+    timerEl.textContent = '0.0s';
     checkedCountEl.textContent = '0';
-    dupNotice.classList.add('hidden');
-    warningEl.classList.add('hidden');
-    liveResultsPanel.classList.add('hidden');
-    tablesPanel.classList.add('hidden');
-    breakdownPanel.classList.add('hidden');
-    liveList.innerHTML = '';
-    tablesGrid.innerHTML = '';
-    state.results = [];
-    state.elapsedMs = 0;
-    state.activeFilter = null;
+    dupNotice.classList.add('hidden'); warningEl.classList.add('hidden');
+    resultsCard.classList.add('hidden');
+    streamView.innerHTML = ''; groupedView.innerHTML = '';
+    stackBar.innerHTML = ''; stackChips.innerHTML = '';
+    state.results = []; state.elapsedMs = 0; state.activeFilter = null;
     updateUrlCount();
   });
 
-  filterPills.addEventListener('click', (e) => {
-    const btn = e.target.closest('.fpill');
+  viewToggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('.view-btn');
     if (!btn) return;
-    const cat = btn.dataset.cat;
-    state.activeFilter = (state.activeFilter === cat) ? null : cat;
-    renderLiveList();
-    renderFilterPills();
+    setView(btn.dataset.view);
+    saveState();
   });
-
-  function renderAll() {
-    if (!state.results.length) {
-      liveResultsPanel.classList.add('hidden');
-      tablesPanel.classList.add('hidden');
-      breakdownPanel.classList.add('hidden');
-      return;
-    }
-    liveResultsPanel.classList.remove('hidden');
-    tablesPanel.classList.remove('hidden');
-    breakdownPanel.classList.remove('hidden');
-    timerEl.textContent = formatElapsed(state.elapsedMs);
-    checkedCountEl.textContent = String(state.results.length);
-
-    renderFilterPills();
-    renderLiveList();
-    renderTables();
-    renderBreakdown();
-  }
-
-  function renderFilterPills() {
-    const counts = countByCategory();
-    [...filterPills.querySelectorAll('.fpill')].forEach(b => {
-      const c = b.dataset.cat;
-      b.classList.toggle('dim', !(counts[c] > 0));
-      b.classList.toggle('active', state.activeFilter === c);
-      b.textContent = `${CAT_LABEL[c]}${counts[c] ? ` (${counts[c]})` : ''}`;
+  function setView(v) {
+    state.view = v;
+    [...viewToggle.querySelectorAll('.view-btn')].forEach(b => {
+      b.classList.toggle('active', b.dataset.view === v);
     });
+    streamView.classList.toggle('hidden', v !== 'stream');
+    groupedView.classList.toggle('hidden', v !== 'grouped');
+    chartView.classList.toggle('hidden', v !== 'chart');
   }
+
+  stackChips.addEventListener('click', (e) => {
+    const chip = e.target.closest('.schip');
+    if (!chip) return;
+    const cat = chip.dataset.cat;
+    state.activeFilter = (state.activeFilter === cat) ? null : cat;
+    renderStream();
+    renderGrouped();
+    renderChips();
+    renderHint();
+  });
+  stackBar.addEventListener('click', (e) => {
+    const seg = e.target.closest('.seg');
+    if (!seg) return;
+    const cat = seg.dataset.cat;
+    state.activeFilter = (state.activeFilter === cat) ? null : cat;
+    renderStream();
+    renderGrouped();
+    renderChips();
+    renderHint();
+  });
+  filterHint.addEventListener('click', (e) => {
+    const a = e.target.closest('a[data-clear]');
+    if (!a) return;
+    state.activeFilter = null;
+    renderStream();
+    renderGrouped();
+    renderChips();
+    renderHint();
+  });
 
   function countByCategory() {
     const counts = {};
@@ -262,90 +251,144 @@
     return counts;
   }
 
-  function renderLiveList() {
-    liveList.innerHTML = '';
-    const items = state.results.filter(r => {
-      if (!state.activeFilter) return true;
-      if (state.activeFilter === 'unique') return !!r.uniqueRedirect;
-      return r.category === state.activeFilter;
-    });
-    for (const r of items) liveList.appendChild(buildLiveRow(r));
+  function renderAll() {
+    if (!state.results.length) { resultsCard.classList.add('hidden'); return; }
+    resultsCard.classList.remove('hidden');
+    timerEl.textContent = formatElapsed(state.elapsedMs);
+    checkedCountEl.textContent = String(state.results.length);
+    renderStackBar();
+    renderChips();
+    renderHint();
+    renderStream();
+    renderGrouped();
+    renderChart();
   }
 
-  function buildLiveRow(r) {
+  function renderStackBar() {
+    stackBar.innerHTML = '';
+    const counts = countByCategory();
+    const total = CATEGORIES.filter(c => c.key !== 'unique').reduce((s, c) => s + (counts[c.key] || 0), 0);
+    if (!total) return;
+    for (const cat of CATEGORIES) {
+      if (cat.key === 'unique') continue;
+      const v = counts[cat.key] || 0;
+      if (!v) continue;
+      const seg = document.createElement('div');
+      seg.className = `seg ${cat.key}`;
+      seg.dataset.cat = cat.key;
+      seg.style.flex = `${v} 0 0`;
+      seg.title = `${cat.label}: ${v} (${((v/total)*100).toFixed(1)}%)`;
+      stackBar.appendChild(seg);
+    }
+  }
+
+  function renderChips() {
+    stackChips.innerHTML = '';
+    const counts = countByCategory();
+    for (const cat of CATEGORIES) {
+      const v = counts[cat.key] || 0;
+      const chip = document.createElement('button');
+      chip.className = 'schip';
+      chip.dataset.cat = cat.key;
+      if (!v) chip.classList.add('dim');
+      if (state.activeFilter === cat.key) chip.classList.add('active');
+      chip.innerHTML = `<span class="sdot"></span>${cat.short} <span class="schip-num">${v}</span>`;
+      stackChips.appendChild(chip);
+    }
+  }
+
+  function renderHint() {
+    if (state.activeFilter) {
+      filterHint.innerHTML = `Filtered to <strong>${CAT_LABEL[state.activeFilter]}</strong> &middot; <a data-clear>clear</a>`;
+    } else {
+      filterHint.textContent = '';
+    }
+  }
+
+  function matchesFilter(r) {
+    if (!state.activeFilter) return true;
+    if (state.activeFilter === 'unique') return !!r.uniqueRedirect;
+    return r.category === state.activeFilter;
+  }
+
+  function renderStream() {
+    streamView.innerHTML = '';
+    const items = state.results.filter(matchesFilter);
+    if (!items.length) {
+      streamView.innerHTML = `<div style="padding:32px 14px;text-align:center;color:#666;font-size:13px;">No results in this category.</div>`;
+      return;
+    }
+    for (const r of items) streamView.appendChild(buildRow(r));
+  }
+
+  function buildRow(r) {
     const row = document.createElement('div');
-    row.className = `live-row cat-${r.category}`;
+    row.className = `row cat-${r.category}`;
 
-    const main = document.createElement('div');
-    main.className = 'live-main';
+    const bar = document.createElement('div'); bar.className = 'bar';
+    row.appendChild(bar);
 
-    const link = document.createElement('a');
-    link.className = 'live-url';
-    link.href = r.url || r.input;
-    link.target = '_blank';
-    link.rel = 'noopener';
-    link.textContent = r.url || r.input;
-    main.appendChild(link);
+    const body = document.createElement('div'); body.className = 'body';
+
+    const urlLine = document.createElement('div');
+    urlLine.className = 'url-line';
+    const a = document.createElement('a');
+    a.href = r.url || r.input; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = r.url || r.input;
+    urlLine.appendChild(a);
+    if (r.uniqueRedirect) {
+      const u = document.createElement('span'); u.className = 'uniq-badge'; u.textContent = 'UNIQUE';
+      urlLine.appendChild(u);
+    }
+    body.appendChild(urlLine);
 
     const detail = document.createElement('div');
-    detail.className = 'live-detail';
+    detail.className = 'detail';
     detail.innerHTML = formatChainDetail(r);
-    main.appendChild(detail);
+    body.appendChild(detail);
 
     if (Array.isArray(r.variations) && r.variations.length) {
-      const vw = document.createElement('div');
-      vw.className = 'var-badges';
+      const vw = document.createElement('div'); vw.className = 'vars';
       for (const v of r.variations) {
-        const a = document.createElement('a');
-        a.className = `var-badge ${v.category || 'down'}`;
-        a.href = v.url; a.target = '_blank'; a.rel = 'noopener';
-        a.title = `${v.url}\n${CAT_LABEL[v.category] || v.category} (${v.status || 'ERR'})`;
-        a.innerHTML = `<span class="vdot"></span>${shortVariant(v.url)}`;
-        vw.appendChild(a);
+        const vb = document.createElement('a');
+        vb.className = `vbadge ${v.category || 'down'}`;
+        vb.href = v.url; vb.target = '_blank'; vb.rel = 'noopener';
+        vb.title = `${v.url}\n${CAT_LABEL[v.category] || v.category} (${v.status || 'ERR'})`;
+        vb.innerHTML = `<span class="vd"></span>${shortVariant(v.url)}`;
+        vw.appendChild(vb);
       }
-      main.appendChild(vw);
+      body.appendChild(vw);
     }
+    row.appendChild(body);
 
-    row.appendChild(main);
-
-    const badge = document.createElement('span');
-    badge.className = `badge ${r.category}`;
-    badge.textContent = CAT_LABEL[r.category] || r.category;
-    row.appendChild(badge);
+    const pill = document.createElement('span');
+    pill.className = `pill ${r.category}`;
+    pill.textContent = CAT_LABEL[r.category] || r.category;
+    row.appendChild(pill);
 
     return row;
   }
 
   function formatChainDetail(r) {
-    const parts = [];
-    const firstStatus = r.firstStatus || 0;
-    parts.push(`HTTP ${firstStatus || 0}`);
-
+    const out = [];
+    out.push(`HTTP ${r.firstStatus || 0}`);
     if (r.chain && r.chain.length) {
-      for (const hop of r.chain) {
-        parts.push(` <span class="arrow">&rarr;</span> Redirect`);
-      }
+      for (const _ of r.chain) out.push(`<span class="arr">&rarr;</span>Redirect`);
     }
-
     if (r.error) {
-      parts.push(` <span class="arrow">&rarr;</span> ${escapeHtml(r.error)}`);
-    } else if (r.finalStatus) {
-      const cfNote = r.cloudflareSeen ? ' with Cloudflare headers' : '';
-      parts.push(` <span class="arrow">&rarr;</span> HTTP ${r.finalStatus}${cfNote}`);
-    } else if (firstStatus && (!r.chain || !r.chain.length)) {
-      // single-hop already shown
+      out.push(`<span class="arr">&rarr;</span>${escapeHtml(r.error)}`);
+    } else if (r.finalStatus && (r.chain && r.chain.length || r.firstStatus !== r.finalStatus)) {
+      const cf = r.cloudflareSeen ? ` <span class="cf-mark">(Cloudflare)</span>` : '';
+      out.push(`<span class="arr">&rarr;</span>HTTP ${r.finalStatus}${cf}`);
+    } else if (r.cloudflareSeen) {
+      out.push(` <span class="cf-mark">(Cloudflare)</span>`);
     }
-
-    if (r.timingMs != null) {
-      parts.push(`<span class="ms"> &middot; ${r.timingMs}ms</span>`);
-    }
-
+    if (r.timingMs != null) out.push(` <span class="ms">&middot; ${r.timingMs}ms</span>`);
     if (r.finalUrl && r.finalUrl !== r.url) {
-      const statusSuffix = r.finalStatus ? ` (${r.finalStatus})` : '';
-      parts.push(` <span class="arrow">&rarr;</span> <a href="${escapeAttr(r.finalUrl)}" target="_blank" rel="noopener">${escapeHtml(r.finalUrl)}</a>${statusSuffix}`);
+      const suffix = r.finalStatus ? ` (${r.finalStatus})` : '';
+      out.push(`<br/><span class="arr">&rarr;</span><a href="${escapeAttr(r.finalUrl)}" target="_blank" rel="noopener">${escapeHtml(r.finalUrl)}</a>${suffix}`);
     }
-
-    return parts.join('');
+    return out.join('');
   }
 
   function shortVariant(u) {
@@ -357,50 +400,51 @@
     } catch (e) { return u; }
   }
 
-  function renderTables() {
-    tablesGrid.innerHTML = '';
+  function renderGrouped() {
+    groupedView.innerHTML = '';
+    let any = false;
     for (const cat of CATEGORIES) {
-      const items = state.results.filter(r =>
-        cat.key === 'unique'
-          ? !!r.uniqueRedirect
-          : r.category === cat.key
-      );
+      const items = state.results.filter(r => {
+        if (state.activeFilter && state.activeFilter !== cat.key) return false;
+        return cat.key === 'unique' ? !!r.uniqueRedirect : r.category === cat.key;
+      });
       if (!items.length) continue;
-      tablesGrid.appendChild(buildTableCard(cat, items));
+      any = true;
+      groupedView.appendChild(buildGroupCard(cat, items));
+    }
+    if (!any) {
+      groupedView.innerHTML = `<div style="padding:32px 14px;text-align:center;color:#666;font-size:13px;">No groups to show.</div>`;
     }
   }
 
-  function buildTableCard(cat, items) {
+  function buildGroupCard(cat, items) {
     const card = document.createElement('div');
-    card.className = `table-card cat-${cat.key}`;
+    card.className = 'group-card';
+    card.dataset.cat = cat.key;
 
     const head = document.createElement('div');
-    head.className = 'table-head';
-    head.innerHTML = `<div class="table-title">${cat.label}</div>`;
+    head.className = 'group-head';
+    head.innerHTML = `<div class="group-title"><span class="gdot"></span>${cat.label}<span class="gcount">${items.length}</span></div>`;
 
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'copy-btn';
-    copyBtn.textContent = 'Copy List';
-    copyBtn.addEventListener('click', async () => {
+    const copy = document.createElement('button');
+    copy.className = 'copy-btn';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', async () => {
       const text = items.map(i => i.url || i.input).join('\n');
       try {
         await navigator.clipboard.writeText(text);
-        copyBtn.classList.add('copied');
-        copyBtn.textContent = 'Copied';
-        setTimeout(() => { copyBtn.classList.remove('copied'); copyBtn.textContent = 'Copy List'; }, 1300);
+        copy.classList.add('copied'); copy.textContent = 'Copied';
+        setTimeout(() => { copy.classList.remove('copied'); copy.textContent = 'Copy'; }, 1300);
       } catch (e) { alert('Copy failed'); }
     });
-    head.appendChild(copyBtn);
+    head.appendChild(copy);
     card.appendChild(head);
 
-    const rows = document.createElement('div');
-    rows.className = 'table-rows';
+    const rows = document.createElement('div'); rows.className = 'group-rows';
     for (const r of items) {
       const a = document.createElement('a');
-      a.className = 'table-row';
-      a.href = r.url || r.input;
-      a.target = '_blank';
-      a.rel = 'noopener';
+      a.className = 'group-row';
+      a.href = r.url || r.input; a.target = '_blank'; a.rel = 'noopener';
       a.textContent = r.url || r.input;
       rows.appendChild(a);
     }
@@ -408,78 +452,53 @@
     return card;
   }
 
-  function renderBreakdown() {
+  function renderChart() {
     const counts = countByCategory();
-    breakdownChips.innerHTML = '';
-    for (const cat of CATEGORIES) {
-      const v = counts[cat.key] || 0;
-      const chip = document.createElement('span');
-      chip.className = 'bchip';
-      chip.dataset.cat = cat.key;
-      chip.textContent = `${SHORT_LABEL[cat.key]}: ${v}`;
-      breakdownChips.appendChild(chip);
-    }
-    drawDonut(counts);
-    renderLegend(counts);
-  }
-
-  function drawDonut(counts) {
     const ctx = donut.getContext('2d');
     const w = donut.width, h = donut.height;
     ctx.clearRect(0, 0, w, h);
     const cx = w / 2, cy = h / 2;
-    const outer = Math.min(w, h) / 2 - 6;
-    const inner = outer * 0.62;
-
+    const outer = Math.min(w, h) / 2 - 8;
+    const inner = outer * 0.66;
     const drawCats = CATEGORIES.filter(c => c.key !== 'unique');
-    const total = drawCats.reduce((sum, c) => sum + (counts[c.key] || 0), 0);
-    if (total === 0) {
-      ctx.fillStyle = '#8b95a7';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.font = '13px -apple-system, Segoe UI, sans-serif';
+    const total = drawCats.reduce((s, c) => s + (counts[c.key] || 0), 0);
+
+    if (!total) {
+      ctx.fillStyle = '#666'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = '13px ui-sans-serif, system-ui, sans-serif';
       ctx.fillText('No data', cx, cy);
-      return;
+    } else {
+      let start = -Math.PI / 2;
+      for (const cat of drawCats) {
+        const v = counts[cat.key] || 0;
+        if (!v) continue;
+        const angle = (v / total) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy); ctx.arc(cx, cy, outer, start, start + angle); ctx.closePath();
+        ctx.fillStyle = cat.color; ctx.fill();
+        start += angle;
+      }
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath(); ctx.arc(cx, cy, inner, 0, Math.PI * 2); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = 'bold 28px ui-sans-serif, system-ui, sans-serif';
+      ctx.fillText(String(total), cx, cy - 6);
+      ctx.font = '11px ui-sans-serif, system-ui, sans-serif'; ctx.fillStyle = '#888';
+      ctx.fillText('total', cx, cy + 16);
     }
 
-    let start = -Math.PI / 2;
-    for (const cat of drawCats) {
-      const v = counts[cat.key] || 0;
-      if (!v) continue;
-      const angle = (v / total) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, outer, start, start + angle);
-      ctx.closePath();
-      ctx.fillStyle = cat.color;
-      ctx.fill();
-      start += angle;
-    }
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.beginPath(); ctx.arc(cx, cy, inner, 0, Math.PI * 2); ctx.fill();
-    ctx.globalCompositeOperation = 'source-over';
-
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = 'bold 26px -apple-system, Segoe UI, sans-serif';
-    ctx.fillText(String(total), cx, cy - 6);
-    ctx.font = '11px -apple-system, Segoe UI, sans-serif';
-    ctx.fillStyle = '#8b95a7';
-    ctx.fillText('total', cx, cy + 16);
-  }
-
-  function renderLegend(counts) {
     legend.innerHTML = '';
-    const total = CATEGORIES.filter(c => c.key !== 'unique').reduce((s, c) => s + (counts[c.key] || 0), 0);
     for (const cat of CATEGORIES) {
       const v = counts[cat.key] || 0;
       if (!v) continue;
       const denom = cat.key === 'unique' ? state.results.length : total;
       const pct = denom ? ((v / denom) * 100).toFixed(1) : '0.0';
       const row = document.createElement('div');
-      row.className = 'row';
+      row.className = 'lrow';
       row.innerHTML = `<span class="swatch" style="background:${cat.color}"></span>
         <span>${cat.label}</span>
-        <span class="count">${v} (${pct}%)</span>`;
+        <span class="lcount">${v} &middot; ${pct}%</span>`;
       legend.appendChild(row);
     }
   }
@@ -494,9 +513,7 @@
   });
 
   function escapeHtml(s) {
-    return String(s ?? '').replace(/[&<>"']/g, c => ({
-      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-    }[c]));
+    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
   function escapeAttr(s) { return escapeHtml(s); }
 

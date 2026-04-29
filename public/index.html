@@ -3,97 +3,96 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Omairs Site Down Checker</title>
+<title>Site Status Checker</title>
 <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
 
-<header class="topbar">
-  <div class="topbar-inner">
-    <div class="title-block">
-      <h1>Omairs Site Down Checker</h1>
-      <p class="subtitle">Detects Up, Down, Redirects, and Cloudflare blocks</p>
+<header class="hero">
+  <div class="hero-inner">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-text">
+        <h1>Site Status Checker</h1>
+        <p>Detect uptime, redirects, and Cloudflare blocks across many URLs at once.</p>
+      </div>
     </div>
-    <button id="howBtn" class="btn pill howbtn">How It Works</button>
+    <button id="howBtn" class="ghost-btn">How it works</button>
   </div>
 </header>
 
 <main class="container">
 
-  <section class="panel">
-    <div class="label-row">
-      <span class="label">Enter one URL per line</span>
-      <span id="urlCount" class="count-badge">0</span>
+  <section class="input-card">
+    <div class="input-head">
+      <span class="input-label">URLs to check</span>
+      <span id="urlCount" class="counter">0</span>
     </div>
     <textarea id="urls" spellcheck="false" placeholder="example.com&#10;https://google.com&#10;cloudflare.com"></textarea>
 
-    <div class="actions">
-      <button id="checkBtn" class="btn check-btn">Check Status</button>
+    <div class="opt-bar">
+      <label class="toggle" data-key="redirects">
+        <input type="checkbox" id="optRedirects" checked />
+        <span class="dot"></span>
+        <span class="opt-text">Check redirects &amp; Cloudflare</span>
+      </label>
+      <label class="toggle" data-key="variations">
+        <input type="checkbox" id="optVariations" />
+        <span class="dot"></span>
+        <span class="opt-text">All 4 URL variations</span>
+      </label>
+      <label class="toggle" data-key="unique">
+        <input type="checkbox" id="optUnique" />
+        <span class="dot"></span>
+        <span class="opt-text">Detect unique redirects</span>
+      </label>
+      <label class="toggle" data-key="advanced">
+        <input type="checkbox" id="optAdvanced" />
+        <span class="dot"></span>
+        <span class="opt-text">Advanced (10 hops)</span>
+      </label>
     </div>
 
-    <div class="options">
-      <label class="opt-pill" data-key="redirects">
-        <input type="checkbox" id="optRedirects" checked />
-        <span class="cbox"></span>
-        <span class="opt-label">Check redirects &amp; Cloudflare</span>
-      </label>
-      <label class="opt-pill" data-key="variations">
-        <input type="checkbox" id="optVariations" />
-        <span class="cbox"></span>
-        <span class="opt-label">Try all 4 variations</span>
-      </label>
-      <label class="opt-pill" data-key="unique">
-        <input type="checkbox" id="optUnique" />
-        <span class="cbox"></span>
-        <span class="opt-label">Detect unique redirects</span>
-      </label>
-      <label class="opt-pill" data-key="advanced">
-        <input type="checkbox" id="optAdvanced" />
-        <span class="cbox"></span>
-        <span class="opt-label">Advanced Redirects (Longer)</span>
-      </label>
-      <label class="opt-pill disabled" data-key="puppeteer" title="Not available on this deployment">
-        <input type="checkbox" id="optPuppeteer" disabled />
-        <span class="cbox"></span>
-        <span class="opt-label">Puppeteer (picture grab)</span>
-      </label>
-      <button id="clearBtn" class="btn bin-btn" title="Clear all data">
+    <div class="run-row">
+      <button id="checkBtn" class="run-btn">
+        <span class="run-arrow">&rarr;</span>
+        <span>Run Check</span>
+      </button>
+      <button id="clearBtn" class="clear-btn" title="Clear all">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>
+        <span>Clear</span>
       </button>
     </div>
 
-    <div id="warning" class="banner warning hidden">Warning: checking 200+ URLs may take a while.</div>
+    <div id="warning" class="banner warning hidden">200+ URLs detected &mdash; this may take a while.</div>
     <div id="dupNotice" class="banner notice hidden"></div>
   </section>
 
-  <section id="liveResultsPanel" class="panel hidden">
-    <div class="filters-row">
-      <div class="filter-pills" id="filterPills">
-        <button class="fpill" data-cat="up">Up</button>
-        <button class="fpill" data-cat="redirect-up">Redirect Up</button>
-        <button class="fpill" data-cat="redirect-down">Redirect Down</button>
-        <button class="fpill" data-cat="unique">Unique Redirect</button>
-        <button class="fpill" data-cat="cloudflare">Cloudflare</button>
-        <button class="fpill" data-cat="down">Down</button>
-      </div>
-      <div class="meta-row">
-        <span class="meta-chip ok"><span id="checkedCount">0</span></span>
-        <span class="meta-chip time"><span id="timer">0s</span></span>
+  <section id="resultsCard" class="results-card hidden">
+    <div class="results-head">
+      <div class="results-title">Results</div>
+      <div class="results-meta">
+        <span class="meta-item"><span class="meta-num" id="checkedCount">0</span><span class="meta-label">checked</span></span>
+        <span class="meta-divider"></span>
+        <span class="meta-item"><span class="meta-num" id="timer">0.0s</span><span class="meta-label">elapsed</span></span>
       </div>
     </div>
-    <div id="liveList" class="live-list"></div>
-  </section>
 
-  <section id="tablesPanel" class="panel-bare hidden">
-    <div id="tablesGrid" class="tables-grid"></div>
-  </section>
+    <div id="stackBar" class="stack-bar"></div>
+    <div id="stackChips" class="stack-chips"></div>
 
-  <section id="breakdownPanel" class="panel hidden">
-    <div class="breakdown-header">
-      <h2 class="breakdown-title">Status Breakdown</h2>
-      <div id="breakdownChips" class="breakdown-chips"></div>
+    <div class="view-row">
+      <div class="view-toggle" id="viewToggle">
+        <button class="view-btn active" data-view="stream">Stream</button>
+        <button class="view-btn" data-view="grouped">Grouped</button>
+        <button class="view-btn" data-view="chart">Chart</button>
+      </div>
+      <div class="filter-hint" id="filterHint"></div>
     </div>
-    <div class="breakdown-body">
+
+    <div id="streamView" class="stream-view"></div>
+    <div id="groupedView" class="grouped-view hidden"></div>
+    <div id="chartView" class="chart-view hidden">
       <canvas id="donut" width="240" height="240"></canvas>
       <div id="legend" class="legend"></div>
     </div>
@@ -105,16 +104,16 @@
   <div class="modal-backdrop"></div>
   <div class="modal-card">
     <div class="modal-head">
-      <h3>How It Works</h3>
+      <h3>How it works</h3>
       <button class="modal-close" id="howClose" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body">
-      <p>Paste one URL per line, then press <strong>Check Status</strong>.</p>
+      <p>Paste one URL per line, then press <strong>Run Check</strong>.</p>
       <ul>
         <li><strong>Check redirects &amp; Cloudflare</strong> &mdash; follows redirect chains and detects Cloudflare challenges, "Page Not Found", and the default nginx page.</li>
-        <li><strong>Try all 4 variations</strong> &mdash; tests <code>https://</code>, <code>http://</code>, <code>https://www.</code> and <code>http://www.</code>.</li>
-        <li><strong>Detect unique redirects</strong> &mdash; flags redirects that resolve to a destination not seen by any other input URL.</li>
-        <li><strong>Advanced Redirects (Longer)</strong> &mdash; follows up to 10 redirect hops instead of 3.</li>
+        <li><strong>All 4 URL variations</strong> &mdash; tests <code>https://</code>, <code>http://</code>, <code>https://www.</code> and <code>http://www.</code>.</li>
+        <li><strong>Detect unique redirects</strong> &mdash; flags redirects that resolve to a destination not seen by any other input URL in the batch.</li>
+        <li><strong>Advanced</strong> &mdash; follows up to 10 redirect hops instead of 3, with a longer timeout.</li>
       </ul>
       <p class="muted">Status priority: Cloudflare patterns &rarr; "Page Not Found" / nginx default &rarr; HTTP status code.</p>
     </div>
