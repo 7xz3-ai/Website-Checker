@@ -13,6 +13,9 @@
   const warningEl = $('warning');
   const dupNotice = $('dupNotice');
   const resultsCard = $('resultsCard');
+  const progressBar = $('progressBar');
+  const progressFill = $('progressFill');
+  const progressLabel = $('progressLabel');
   const stackBar = $('stackBar');
   const stackChips = $('stackChips');
   const viewToggle = $('viewToggle');
@@ -130,7 +133,11 @@
   }
   function stopTimer() { if (timerInterval) { clearInterval(timerInterval); timerInterval = null; } }
 
+  let activeAbort = null;
+
   checkBtn.addEventListener('click', async () => {
+    if (activeAbort) { activeAbort.abort(); activeAbort = null; return; }
+
     const lines = parseUrlLines(urlsEl.value);
     if (!lines.length) { alert('Please enter at least one URL.'); return; }
     const { unique, dups } = dedupe(lines);
@@ -141,44 +148,138 @@
 
     state.results = [];
     state.activeFilter = null;
+    state.streaming = true;
+    state.total = unique.length;
     resultsCard.classList.remove('hidden');
     streamView.innerHTML = ''; groupedView.innerHTML = '';
     stackBar.innerHTML = ''; stackChips.innerHTML = '';
-    checkedCountEl.textContent = '0';
+    setTallyText(0, unique.length);
+    setProgress(0, unique.length);
+    showProgressBar(true);
+    if (state.view !== 'stream') setView('stream');
 
-    checkBtn.disabled = true;
-    const origLabel = checkBtn.querySelector('span:last-child').textContent;
-    checkBtn.querySelector('span:last-child').textContent = 'Checking...';
+    setRunButton('cancel');
 
     const start = Date.now();
     startTimer(start);
+
+    activeAbort = new AbortController();
 
     try {
       const res = await fetch('/api/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: unique, ...getOpts() })
+        body: JSON.stringify({ urls: unique, ...getOpts() }),
+        signal: activeAbort.signal
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
-      const data = await res.json();
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let doneSignaled = false;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          let msg;
+          try { msg = JSON.parse(line); } catch (e) { continue; }
+          if (msg.type === 'done') doneSignaled = true;
+          handleStreamMsg(msg);
+        }
+      }
+
       const elapsed = Date.now() - start;
       stopTimer();
       timerEl.textContent = formatElapsed(elapsed);
-      state.results = data.results || [];
       state.elapsedMs = elapsed;
-      renderAll();
+      state.streaming = false;
+      showProgressBar(false);
+      finalizeRender(doneSignaled);
       saveState();
     } catch (e) {
       stopTimer();
-      alert('Check failed: ' + e.message);
+      state.streaming = false;
+      showProgressBar(false);
+      if (e.name !== 'AbortError') alert('Check failed: ' + e.message);
     } finally {
-      checkBtn.disabled = false;
-      checkBtn.querySelector('span:last-child').textContent = origLabel;
+      activeAbort = null;
+      setRunButton('idle');
     }
   });
+
+  function setRunButton(mode) {
+    const labelEl = checkBtn.querySelector('.run-label');
+    const arrowEl = checkBtn.querySelector('.run-arrow');
+    if (mode === 'cancel') {
+      labelEl.textContent = 'Cancel';
+      arrowEl.textContent = '×';
+      checkBtn.classList.add('cancel');
+    } else {
+      labelEl.textContent = 'Run Check';
+      arrowEl.textContent = '→';
+      checkBtn.classList.remove('cancel');
+    }
+  }
+
+  function handleStreamMsg(msg) {
+    if (msg.type === 'start') {
+      state.total = msg.total;
+      setTallyText(0, msg.total);
+      setProgress(0, msg.total);
+    } else if (msg.type === 'result') {
+      const r = msg.result;
+      r._index = msg.index;
+      state.results.push(r);
+      setTallyText(msg.completed, msg.total);
+      setProgress(msg.completed, msg.total);
+      if (matchesFilter(r)) {
+        const row = buildRow(r);
+        row.classList.add('row-enter');
+        streamView.appendChild(row);
+        requestAnimationFrame(() => row.classList.add('row-enter-active'));
+      }
+    } else if (msg.type === 'done') {
+      if (Array.isArray(msg.uniqueIndexes) && msg.uniqueIndexes.length) {
+        const set = new Set(msg.uniqueIndexes);
+        for (const r of state.results) {
+          if (set.has(r._index)) r.uniqueRedirect = true;
+        }
+      }
+    } else if (msg.type === 'error') {
+      console.error('stream error', msg.error);
+    }
+  }
+
+  function finalizeRender(_doneSignaled) {
+    state.results.sort((a, b) => (a._index ?? 0) - (b._index ?? 0));
+    renderAll();
+  }
+
+  function setTallyText(done, total) {
+    if (state.streaming && total) {
+      checkedCountEl.innerHTML = `${done}<span class="of">/${total}</span>`;
+    } else {
+      checkedCountEl.textContent = String(done || 0);
+    }
+  }
+  function setProgress(done, total) {
+    const pct = total ? Math.min(100, (done / total) * 100) : 0;
+    progressFill.style.width = pct + '%';
+    progressLabel.textContent = total ? `${done} of ${total}` : '';
+  }
+  function showProgressBar(on) {
+    progressBar.classList.toggle('hidden', !on);
+  }
 
   clearBtn.addEventListener('click', () => {
     if (!confirm('Clear all URLs, results, and settings?')) return;

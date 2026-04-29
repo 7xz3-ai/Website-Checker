@@ -208,7 +208,13 @@ textarea#urls::placeholder { color: var(--dim); }
 .run-btn:hover { background: #e8e8e8; }
 .run-btn:active { transform: translateY(1px); }
 .run-btn:disabled { background: #404040; color: #888; cursor: not-allowed; }
-.run-arrow { font-size: 16px; }
+.run-btn.cancel {
+  background: rgba(255, 84, 112, 0.15);
+  color: var(--down);
+  border: 1px solid rgba(255, 84, 112, 0.5);
+}
+.run-btn.cancel:hover { background: rgba(255, 84, 112, 0.22); }
+.run-arrow { font-size: 16px; line-height: 1; }
 
 .clear-btn {
   appearance: none;
@@ -271,12 +277,56 @@ textarea#urls::placeholder { color: var(--dim); }
   font-variant-numeric: tabular-nums;
 }
 .meta-item { display: inline-flex; align-items: baseline; gap: 5px; }
-.meta-num { color: #fff; font-weight: 700; font-size: 15px; }
+.meta-num { color: #fff; font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
+.meta-num .of { color: var(--muted); font-weight: 500; margin-left: 1px; }
 .meta-label { color: var(--muted); font-size: 12px; }
 .meta-divider {
   width: 1px; height: 14px;
   background: var(--border-2);
   display: inline-block;
+}
+
+.progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.progress-track {
+  flex: 1;
+  height: 6px;
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--up), var(--rup));
+  border-radius: 999px;
+  transition: width 0.18s ease-out;
+  position: relative;
+}
+.progress-fill::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+  animation: shimmer 1.4s linear infinite;
+}
+@keyframes shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+.progress-label {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+  min-width: 80px;
+  text-align: right;
 }
 
 /* STACKED STATUS BAR */
@@ -405,6 +455,8 @@ textarea#urls::placeholder { color: var(--dim); }
 }
 .row:last-child { border-bottom: none; }
 .row:hover { background: var(--panel-3); }
+.row.row-enter { opacity: 0; transform: translateY(-4px); }
+.row.row-enter.row-enter-active { opacity: 1; transform: translateY(0); transition: opacity 0.25s, transform 0.25s; }
 .row .bar { height: 100%; min-height: 32px; align-self: stretch; }
 .row.cat-up            .bar { background: var(--up); }
 .row.cat-redirect-up   .bar { background: var(--rup); }

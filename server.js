@@ -287,26 +287,63 @@ app.post('/api/check', async (req, res) => {
       advanced: !!advanced
     };
 
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+    const send = (obj) => {
+      res.write(JSON.stringify(obj) + '\n');
+      if (typeof res.flush === 'function') res.flush();
+    };
+
+    const startedAt = Date.now();
+    send({ type: 'start', total: urls.length, startedAt });
+
     const concurrency = 8;
     const results = new Array(urls.length);
     let idx = 0;
+    let completed = 0;
+    let aborted = false;
+
+    res.on('close', () => {
+      if (!res.writableEnded) aborted = true;
+    });
+
     async function worker() {
-      while (true) {
+      while (!aborted) {
         const i = idx++;
         if (i >= urls.length) return;
-        results[i] = await checkSingleUrl(urls[i], opts);
+        const r = await checkSingleUrl(urls[i], opts);
+        results[i] = r;
+        completed++;
+        send({ type: 'result', index: i, completed, total: urls.length, result: r });
       }
     }
+
     const workers = [];
     for (let i = 0; i < Math.min(concurrency, urls.length); i++) workers.push(worker());
     await Promise.all(workers);
 
+    if (aborted) { res.end(); return; }
+
     if (opts.unique) markUniqueRedirects(results);
     else for (const r of results) r.uniqueRedirect = false;
 
-    res.json({ results });
+    const uniqueIndexes = [];
+    for (let i = 0; i < results.length; i++) {
+      if (results[i] && results[i].uniqueRedirect) uniqueIndexes.push(i);
+    }
+
+    send({ type: 'done', elapsedMs: Date.now() - startedAt, uniqueIndexes });
+    res.end();
   } catch (e) {
-    res.status(500).json({ error: e.message || 'server error' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: e.message || 'server error' });
+    } else {
+      try { res.write(JSON.stringify({ type: 'error', error: e.message || 'server error' }) + '\n'); } catch {}
+      res.end();
+    }
   }
 });
 
