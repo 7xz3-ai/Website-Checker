@@ -91,6 +91,7 @@
         <button class="view-btn active" data-view="stream">Stream</button>
         <button class="view-btn" data-view="grouped">Grouped</button>
         <button class="view-btn" data-view="chart">Chart</button>
+        <button class="view-btn" data-view="notes">Notes <span id="notesBadge" class="view-badge hidden">0</span></button>
       </div>
       <div class="view-row-right">
         <label class="hv-toggle" title="Hide rows you've already done">
@@ -108,6 +109,32 @@
     <div id="chartView" class="chart-view hidden">
       <canvas id="donut" width="240" height="240"></canvas>
       <div id="legend" class="legend"></div>
+    </div>
+    <div id="notesView" class="notes-view hidden">
+      <div class="notes-section">
+        <div class="notes-section-head">
+          <h3>General notes</h3>
+          <span class="notes-hint" id="notesAutosave">Auto-saved</span>
+        </div>
+        <textarea id="generalNotes" class="general-notes" spellcheck="true" placeholder="Anything you want to remember about this batch &mdash; reminders, follow-ups, who owns what..."></textarea>
+      </div>
+      <div class="notes-section">
+        <div class="notes-section-head">
+          <h3>Saved sites <span id="savedSitesCount" class="notes-count">0</span></h3>
+          <div class="notes-actions">
+            <button id="exportNotesBtn" class="copy-btn">Export</button>
+            <button id="clearNotesBtn" class="copy-btn danger">Clear all</button>
+          </div>
+        </div>
+        <div id="savedSitesList" class="saved-sites"></div>
+        <div id="savedSitesEmpty" class="empty-hint">
+          Add sites with the bookmark button on any row, or by pasting a URL below.
+        </div>
+        <div class="add-site-row">
+          <input id="addSiteInput" type="text" placeholder="https://example.com" />
+          <button id="addSiteBtn" class="copy-btn">Add</button>
+        </div>
+      </div>
     </div>
   </section>
 

@@ -21,15 +21,75 @@ const CLOUDFLARE_PATTERNS = [
   /__cf_chl_/i,
   /Please enable Cookies and reload the page/i
 ];
-const PAGE_NOT_FOUND_PATTERNS = [
-  /<title>[^<]*Page Not Found[^<]*<\/title>/i,
-  /<title>[^<]*404[^<]*Not Found[^<]*<\/title>/i,
-  />\s*Page Not Found\s*</i
+
+// Body patterns that mean the site is effectively down.
+// Order matters only loosely - the first match wins for naming the reason.
+const DOWN_SIGNATURES = [
+  // Generic 404 / not found
+  { name: '404 page',                    pattern: /<title>[^<]*Page Not Found[^<]*<\/title>/i },
+  { name: '404 page',                    pattern: /<title>[^<]*404[^<]*Not Found[^<]*<\/title>/i },
+  { name: '404 page',                    pattern: /<title>[^<]*Error\s*404[^<]*<\/title>/i },
+  { name: '404 page',                    pattern: /<h1[^>]*>\s*404\s*<\/h1>/i },
+  { name: 'Soft 404',                    pattern: /<h1[^>]*>\s*Page Not Found\s*<\/h1>/i },
+
+  // Default server pages
+  { name: 'Nginx default page',          pattern: /<title>\s*Welcome to nginx!?\s*<\/title>/i },
+  { name: 'Nginx default page',          pattern: /<h1>\s*Welcome to nginx!?\s*<\/h1>/i },
+  { name: 'Apache default page',         pattern: /<title>\s*Apache2 (Ubuntu|Debian|CentOS)? ?Default Page[^<]*<\/title>/i },
+  { name: 'Apache default page',         pattern: /<title>\s*Test Page for the Apache HTTP Server[^<]*<\/title>/i },
+  { name: 'Apache default page',         pattern: /<h1[^>]*>\s*It works!?\s*<\/h1>/i },
+  { name: 'IIS default page',            pattern: /<title>\s*IIS Windows Server\s*<\/title>/i },
+  { name: 'IIS default page',            pattern: /<title>[^<]*Welcome to IIS[^<]*<\/title>/i },
+  { name: 'LiteSpeed default page',      pattern: /<title>[^<]*LiteSpeed Web Server[^<]*<\/title>/i },
+
+  // Hosting-platform "not found" pages
+  { name: 'Wix - site not found',        pattern: /<title>[^<]*Wix\.com[^<]*<\/title>[\s\S]{0,400}?(domain is not connected|site is not published|page isn't available)/i },
+  { name: 'Wix - site not found',        pattern: />\s*This domain is not connected to a website[^<]*</i },
+  { name: 'Squarespace - expired',       pattern: /<title>[^<]*Website Expired[^<]*<\/title>/i },
+  { name: 'Squarespace - expired',       pattern: />\s*This site has expired\s*</i },
+  { name: 'Squarespace - not found',     pattern: />\s*The page you are looking for does not exist\s*</i },
+  { name: 'Vercel - deployment not found', pattern: /<title>[^<]*404[: ]+(NOT[_ ]FOUND|Not Found)[^<]*<\/title>[\s\S]*?vercel/i },
+  { name: 'Vercel - deployment not found', pattern: /DEPLOYMENT_NOT_FOUND/ },
+  { name: 'Netlify - page not found',    pattern: /<title>[^<]*Page Not Found - Netlify[^<]*<\/title>/i },
+  { name: 'Netlify - page not found',    pattern: /Looks like you've followed a broken link[\s\S]{0,200}Netlify/i },
+  { name: 'GitHub Pages - 404',          pattern: /<title>\s*Site not found\s*&middot;\s*GitHub Pages\s*<\/title>/i },
+  { name: 'GitHub Pages - 404',          pattern: /<title>\s*Site not found\s*·\s*GitHub Pages\s*<\/title>/i },
+  { name: 'Heroku - app not found',      pattern: /<title>[^<]*No such app[^<]*<\/title>/i },
+  { name: 'Heroku - app not found',      pattern: /no-such-app\.html/i },
+  { name: 'Heroku - app crashed',        pattern: /<title>[^<]*Application Error[^<]*<\/title>[\s\S]*?heroku/i },
+  { name: 'Render - service not found',  pattern: /<title>[^<]*Not Found - Render[^<]*<\/title>/i },
+  { name: 'Fly.io - app not found',      pattern: /<title>[^<]*Fly\.io[^<]*<\/title>[\s\S]*?app[\s\S]{0,40}not found/i },
+
+  // Suspensions
+  { name: 'Account suspended',           pattern: /<title>[^<]*Account Suspended[^<]*<\/title>/i },
+  { name: 'Account suspended',           pattern: /<h1[^>]*>\s*Account Suspended\s*<\/h1>/i },
+  { name: 'Account suspended',           pattern: />\s*This Account has been suspended\s*</i },
+
+  // Parking & for-sale
+  { name: 'GoDaddy - parked',            pattern: /Future home of something quite cool/i },
+  { name: 'GoDaddy - parked',            pattern: /img\.dpbolvw\.net|godaddy\.com\/?utm_source=domainparking/i },
+  { name: 'Sedo - parked',               pattern: /sedoparking\.com/i },
+  { name: 'Sedo - parked',               pattern: /<title>[^<]*Parked Domain[^<]*<\/title>[\s\S]*?sedo/i },
+  { name: 'HugeDomains - for sale',      pattern: /HugeDomains\.com/i },
+  { name: 'Bodis - parked',              pattern: /bodis\.com/i },
+  { name: 'Domain for sale',             pattern: /<title>[^<]*(domain is for sale|buy this domain)[^<]*<\/title>/i },
+  { name: 'Domain for sale',             pattern: /<h1[^>]*>\s*(This domain may be for sale|Buy this domain)/i },
+  { name: 'Domain expired',              pattern: /<title>[^<]*Domain Expired[^<]*<\/title>/i },
+  { name: 'Domain expired',              pattern: />\s*This domain has expired\s*</i },
+  { name: 'Parked domain',               pattern: /<title>[^<]*Parked Domain[^<]*<\/title>/i },
+  { name: 'Parked domain',               pattern: />\s*This Web page is parked\s*</i }
 ];
-const NGINX_DEFAULT_PATTERNS = [
-  /<title>\s*Welcome to nginx!?\s*<\/title>/i,
-  />\s*Welcome to nginx!?\s*</i
-];
+
+function classifyByBody(body) {
+  if (!body) return null;
+  for (const p of CLOUDFLARE_PATTERNS) {
+    if (p.test(body)) return { category: 'cloudflare', reason: 'Cloudflare challenge' };
+  }
+  for (const sig of DOWN_SIGNATURES) {
+    if (sig.pattern.test(body)) return { category: 'down', reason: sig.name };
+  }
+  return null;
+}
 
 function normalizeUrl(raw) {
   if (!raw) return null;
@@ -62,14 +122,6 @@ function getDomainVariations(rawUrl) {
       `http://www.${host}${tail}`
     ];
   } catch (e) { return []; }
-}
-
-function classifyByBody(body) {
-  if (!body) return null;
-  for (const p of CLOUDFLARE_PATTERNS) if (p.test(body)) return 'cloudflare';
-  for (const p of PAGE_NOT_FOUND_PATTERNS) if (p.test(body)) return 'down';
-  for (const p of NGINX_DEFAULT_PATTERNS) if (p.test(body)) return 'down';
-  return null;
 }
 
 function isCloudflareHeader(headers) {
@@ -166,22 +218,29 @@ async function followAndCheck(startUrl, opts) {
 
   const timingMs = Date.now() - startedAt;
   const bodyClass = classifyByBody(lastBody);
-  if (bodyClass === 'cloudflare') cloudflareSeen = true;
+  let downReason = null;
+  if (bodyClass && bodyClass.category === 'cloudflare') cloudflareSeen = true;
 
   let category;
   if (error) {
     category = chain.length ? 'redirect-down' : 'down';
-  } else if (bodyClass === 'cloudflare' || (cloudflareSeen && lastStatus >= 400)) {
+    downReason = error.startsWith('Unreachable') ? 'Network unreachable' : 'Connection failed';
+  } else if ((bodyClass && bodyClass.category === 'cloudflare') || (cloudflareSeen && lastStatus >= 400)) {
     category = chain.length ? 'redirect-down' : 'cloudflare';
     if (!chain.length && cloudflareSeen) category = 'cloudflare';
-  } else if (bodyClass === 'down') {
+    downReason = (bodyClass && bodyClass.reason) || 'Cloudflare block';
+  } else if (bodyClass && bodyClass.category === 'down') {
     category = chain.length ? 'redirect-down' : 'down';
+    downReason = bodyClass.reason;
   } else {
     const statusCat = classifyByStatus(lastStatus);
     if (chain.length) {
       category = (statusCat === 'up') ? 'redirect-up' : 'redirect-down';
     } else {
       category = statusCat === 'redirect' ? 'redirect-down' : statusCat;
+    }
+    if (category === 'down' || category === 'redirect-down') {
+      downReason = lastStatus ? `HTTP ${lastStatus}` : 'No response';
     }
   }
 
@@ -193,7 +252,8 @@ async function followAndCheck(startUrl, opts) {
     timingMs,
     error,
     cloudflareSeen,
-    category
+    category,
+    downReason
   };
 }
 
@@ -235,7 +295,8 @@ async function checkSingleUrl(rawUrl, opts) {
     timingMs: main.timingMs,
     cloudflareSeen: main.cloudflareSeen,
     error: main.error || null,
-    category: main.category
+    category: main.category,
+    downReason: main.downReason || null
   };
 
   if (opts.variations) {

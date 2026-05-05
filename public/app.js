@@ -30,9 +30,21 @@
   const howClose = $('howClose');
   const hideVisitedEl = $('hideVisited');
   const visitedCountEl = $('visitedCount');
+  const notesView = $('notesView');
+  const generalNotesEl = $('generalNotes');
+  const notesAutosaveEl = $('notesAutosave');
+  const savedSitesListEl = $('savedSitesList');
+  const savedSitesEmptyEl = $('savedSitesEmpty');
+  const savedSitesCountEl = $('savedSitesCount');
+  const addSiteInput = $('addSiteInput');
+  const addSiteBtn = $('addSiteBtn');
+  const exportNotesBtn = $('exportNotesBtn');
+  const clearNotesBtn = $('clearNotesBtn');
+  const notesBadge = $('notesBadge');
 
   const STORAGE_KEY = 'site-checker-state-v3';
   const VISITED_KEY = 'site-checker-visited-v1';
+  const NOTES_KEY = 'site-checker-notes-v1';
 
   function loadVisited() {
     try {
@@ -57,6 +69,66 @@
   }
   const visited = loadVisited();
   let hideVisited = false;
+
+  function loadNotes() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(NOTES_KEY));
+      if (!raw || typeof raw !== 'object') return { general: '', sites: {} };
+      return { general: String(raw.general || ''), sites: raw.sites && typeof raw.sites === 'object' ? raw.sites : {} };
+    } catch (e) { return { general: '', sites: {} }; }
+  }
+  let notesSaveTimer = null;
+  function saveNotes(immediate) {
+    const doSave = () => {
+      try { localStorage.setItem(NOTES_KEY, JSON.stringify(notes)); } catch (e) {}
+      if (notesAutosaveEl) {
+        notesAutosaveEl.textContent = 'Saved';
+        clearTimeout(notesAutosaveEl._t);
+        notesAutosaveEl._t = setTimeout(() => { notesAutosaveEl.textContent = 'Auto-saved'; }, 1200);
+      }
+    };
+    if (immediate) doSave();
+    else { clearTimeout(notesSaveTimer); notesSaveTimer = setTimeout(doSave, 250); }
+  }
+  function notesKey(url) { return visitedKey(url); }
+  function isNoted(url) { return !!notes.sites[notesKey(url)]; }
+  function addSiteToNotes(url, source) {
+    const k = notesKey(url);
+    if (notes.sites[k]) return false;
+    notes.sites[k] = {
+      url: url,
+      addedAt: Date.now(),
+      category: source && source.category ? source.category : null,
+      finalStatus: source && source.finalStatus != null ? source.finalStatus : null,
+      downReason: source && source.downReason ? source.downReason : null,
+      note: ''
+    };
+    saveNotes(true);
+    updateNotesBadge();
+    return true;
+  }
+  function removeSiteFromNotes(url) {
+    const k = notesKey(url);
+    if (!notes.sites[k]) return false;
+    delete notes.sites[k];
+    saveNotes(true);
+    updateNotesBadge();
+    return true;
+  }
+  function setSiteNote(url, text) {
+    const k = notesKey(url);
+    if (!notes.sites[k]) return;
+    notes.sites[k].note = String(text || '');
+    saveNotes();
+  }
+  function updateNotesBadge() {
+    const n = Object.keys(notes.sites).length;
+    if (n > 0) {
+      notesBadge.textContent = String(n);
+      notesBadge.classList.remove('hidden');
+    } else notesBadge.classList.add('hidden');
+  }
+  const notes = loadNotes();
 
   const CATEGORIES = [
     { key: 'up',            label: 'Up',            short: 'Up',     color: '#22d172' },
@@ -122,9 +194,156 @@
     }
     setView(state.view);
     hideVisitedEl.checked = hideVisited;
+    generalNotesEl.value = notes.general || '';
     updateUrlCount();
     updateWarning();
     updateVisitedCount();
+    updateNotesBadge();
+    if (Object.keys(notes.sites).length || (notes.general && notes.general.length)) {
+      resultsCard.classList.remove('hidden');
+      if (state.view === 'notes') renderNotes();
+    }
+  }
+
+  generalNotesEl.addEventListener('input', () => {
+    notes.general = generalNotesEl.value;
+    saveNotes();
+  });
+  addSiteBtn.addEventListener('click', () => {
+    const v = (addSiteInput.value || '').trim();
+    if (!v) return;
+    addSiteToNotes(v, null);
+    addSiteInput.value = '';
+    renderNotes();
+    refreshAllRowsNoteState();
+  });
+  addSiteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addSiteBtn.click(); });
+  exportNotesBtn.addEventListener('click', exportNotes);
+  clearNotesBtn.addEventListener('click', () => {
+    if (!Object.keys(notes.sites).length && !notes.general) return;
+    if (!confirm('Clear all notes (general + saved sites)?')) return;
+    notes.general = '';
+    notes.sites = {};
+    saveNotes(true);
+    generalNotesEl.value = '';
+    renderNotes();
+    refreshAllRowsNoteState();
+  });
+
+  function exportNotes() {
+    const lines = [];
+    lines.push('# Notes export');
+    lines.push('Generated: ' + new Date().toISOString());
+    lines.push('');
+    if (notes.general && notes.general.trim()) {
+      lines.push('## General');
+      lines.push(notes.general.trim());
+      lines.push('');
+    }
+    const sites = Object.values(notes.sites).sort((a, b) => a.addedAt - b.addedAt);
+    if (sites.length) {
+      lines.push('## Saved sites (' + sites.length + ')');
+      for (const s of sites) {
+        const status = s.category ? ` [${s.category}${s.finalStatus ? ' ' + s.finalStatus : ''}]` : '';
+        lines.push('- ' + s.url + status);
+        if (s.downReason) lines.push('  reason: ' + s.downReason);
+        if (s.note && s.note.trim()) {
+          for (const ln of s.note.split('\n')) lines.push('  ' + ln);
+        }
+      }
+    }
+    const text = lines.join('\n');
+    const blob = new Blob([text], { type: 'text/markdown' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'notes-' + new Date().toISOString().slice(0, 10) + '.md';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  function renderNotes() {
+    savedSitesCountEl.textContent = String(Object.keys(notes.sites).length);
+    savedSitesListEl.innerHTML = '';
+    const sites = Object.values(notes.sites).sort((a, b) => a.addedAt - b.addedAt);
+    savedSitesEmptyEl.classList.toggle('hidden', sites.length > 0);
+    for (const s of sites) savedSitesListEl.appendChild(buildSavedSiteCard(s));
+  }
+
+  function buildSavedSiteCard(s) {
+    const card = document.createElement('div');
+    card.className = 'saved-site';
+    if (s.category) card.classList.add('cat-' + s.category);
+
+    const head = document.createElement('div');
+    head.className = 'saved-site-head';
+
+    const link = document.createElement('a');
+    link.className = 'saved-site-url';
+    link.href = s.url; link.target = '_blank'; link.rel = 'noopener';
+    link.textContent = s.url;
+    head.appendChild(link);
+
+    const meta = document.createElement('div');
+    meta.className = 'saved-site-meta';
+    if (s.category) {
+      const badge = document.createElement('span');
+      badge.className = 'pill ' + s.category;
+      badge.textContent = CAT_LABEL[s.category] || s.category;
+      meta.appendChild(badge);
+    }
+    if (s.downReason) {
+      const r = document.createElement('span');
+      r.className = 'reason-tag';
+      r.textContent = s.downReason;
+      meta.appendChild(r);
+    }
+    const ago = document.createElement('span');
+    ago.className = 'saved-site-when';
+    ago.textContent = 'Added ' + timeAgo(s.addedAt);
+    meta.appendChild(ago);
+    head.appendChild(meta);
+
+    const remove = document.createElement('button');
+    remove.className = 'saved-site-remove';
+    remove.title = 'Remove from notes';
+    remove.innerHTML = '&times;';
+    remove.addEventListener('click', () => {
+      removeSiteFromNotes(s.url);
+      renderNotes();
+      refreshAllRowsNoteState();
+    });
+    head.appendChild(remove);
+    card.appendChild(head);
+
+    const ta = document.createElement('textarea');
+    ta.className = 'saved-site-note';
+    ta.placeholder = 'Note for this site...';
+    ta.value = s.note || '';
+    ta.addEventListener('input', () => setSiteNote(s.url, ta.value));
+    card.appendChild(ta);
+
+    return card;
+  }
+
+  function timeAgo(ts) {
+    if (!ts) return 'just now';
+    const d = (Date.now() - ts) / 1000;
+    if (d < 60) return Math.round(d) + 's ago';
+    if (d < 3600) return Math.round(d / 60) + 'm ago';
+    if (d < 86400) return Math.round(d / 3600) + 'h ago';
+    return Math.round(d / 86400) + 'd ago';
+  }
+
+  function refreshAllRowsNoteState() {
+    streamView.querySelectorAll('.note-toggle').forEach(btn => {
+      const url = btn.dataset.url;
+      btn.classList.toggle('on', isNoted(url));
+    });
+    groupedView.querySelectorAll('.note-toggle').forEach(btn => {
+      const url = btn.dataset.url;
+      btn.classList.toggle('on', isNoted(url));
+    });
   }
 
   hideVisitedEl.addEventListener('change', () => {
@@ -359,6 +578,8 @@
     streamView.classList.toggle('hidden', v !== 'stream');
     groupedView.classList.toggle('hidden', v !== 'grouped');
     chartView.classList.toggle('hidden', v !== 'chart');
+    notesView.classList.toggle('hidden', v !== 'notes');
+    if (v === 'notes') renderNotes();
   }
 
   stackChips.addEventListener('click', (e) => {
@@ -487,6 +708,29 @@
     btn.title = on ? 'Mark as not visited' : 'Mark as visited';
   }
 
+  const BOOKMARK_SVG = '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3.5 1.5h9a1 1 0 0 1 1 1V14a.5.5 0 0 1-.78.42L8 11.06l-4.72 3.36A.5.5 0 0 1 2.5 14V2.5a1 1 0 0 1 1-1z" fill="currentColor"/></svg>';
+
+  function makeNoteToggle(result) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'note-toggle';
+    const url = result.url || result.input;
+    btn.dataset.url = url;
+    btn.innerHTML = BOOKMARK_SVG;
+    btn.title = isNoted(url) ? 'Remove from notes' : 'Add to notes';
+    if (isNoted(url)) btn.classList.add('on');
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isNoted(url)) removeSiteFromNotes(url);
+      else addSiteToNotes(url, result);
+      btn.classList.toggle('on', isNoted(url));
+      btn.title = isNoted(url) ? 'Remove from notes' : 'Add to notes';
+      if (state.view === 'notes') renderNotes();
+    });
+    return btn;
+  }
+
   function updateGroupHeaderCounts() {
     const heads = groupedView.querySelectorAll('.group-card');
     heads.forEach(card => {
@@ -550,6 +794,7 @@
       const u = document.createElement('span'); u.className = 'uniq-badge'; u.textContent = 'UNIQUE';
       urlLine.appendChild(u);
     }
+    urlLine.appendChild(makeNoteToggle(r));
     body.appendChild(urlLine);
 
     const detail = document.createElement('div');
@@ -594,11 +839,18 @@
       out.push(` <span class="cf-mark">(Cloudflare)</span>`);
     }
     if (r.timingMs != null) out.push(` <span class="ms">&middot; ${r.timingMs}ms</span>`);
+    if (r.downReason && !isGenericReason(r.downReason)) {
+      out.push(` <span class="reason-tag">${escapeHtml(r.downReason)}</span>`);
+    }
     if (r.finalUrl && r.finalUrl !== r.url) {
       const suffix = r.finalStatus ? ` (${r.finalStatus})` : '';
       out.push(`<br/><span class="arr">&rarr;</span><a href="${escapeAttr(r.finalUrl)}" target="_blank" rel="noopener">${escapeHtml(r.finalUrl)}</a>${suffix}`);
     }
     return out.join('');
+  }
+  function isGenericReason(reason) {
+    if (!reason) return true;
+    return /^HTTP \d{3}$/i.test(reason) || reason === 'No response' || reason === 'Connection failed' || reason === 'Network unreachable';
   }
 
   function shortVariant(u) {
@@ -704,6 +956,7 @@
         }
       });
       rowEl.appendChild(a);
+      rowEl.appendChild(makeNoteToggle(r));
 
       if (hideVisited && isVisited(url)) rowEl.classList.add('hidden');
       rows.appendChild(rowEl);
