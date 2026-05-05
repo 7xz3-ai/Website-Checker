@@ -28,8 +28,35 @@
   const howBtn = $('howBtn');
   const howModal = $('howModal');
   const howClose = $('howClose');
+  const hideVisitedEl = $('hideVisited');
+  const visitedCountEl = $('visitedCount');
 
   const STORAGE_KEY = 'site-checker-state-v3';
+  const VISITED_KEY = 'site-checker-visited-v1';
+
+  function loadVisited() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(VISITED_KEY)) || [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch (e) { return new Set(); }
+  }
+  function saveVisited() {
+    try { localStorage.setItem(VISITED_KEY, JSON.stringify([...visited])); } catch (e) {}
+  }
+  function visitedKey(url) {
+    try {
+      const u = new URL(url);
+      return u.host.toLowerCase().replace(/^www\./, '') + u.pathname.replace(/\/+$/, '');
+    } catch (e) { return String(url || '').toLowerCase(); }
+  }
+  function isVisited(url) { return visited.has(visitedKey(url)); }
+  function markVisited(url, on) {
+    const k = visitedKey(url);
+    if (on) visited.add(k); else visited.delete(k);
+    saveVisited();
+  }
+  const visited = loadVisited();
+  let hideVisited = false;
 
   const CATEGORIES = [
     { key: 'up',            label: 'Up',            short: 'Up',     color: '#22d172' },
@@ -55,7 +82,8 @@
         opts: getOpts(),
         results: state.results,
         elapsedMs: state.elapsedMs,
-        view: state.view
+        view: state.view,
+        hideVisited: hideVisited
       }));
     } catch (e) {}
   }
@@ -85,6 +113,7 @@
         optAdvanced.checked = !!s.opts.advanced;
       }
       if (s.view) state.view = s.view;
+      if (typeof s.hideVisited === 'boolean') hideVisited = s.hideVisited;
       if (Array.isArray(s.results) && s.results.length) {
         state.results = s.results;
         state.elapsedMs = s.elapsedMs || 0;
@@ -92,8 +121,23 @@
       }
     }
     setView(state.view);
+    hideVisitedEl.checked = hideVisited;
     updateUrlCount();
     updateWarning();
+    updateVisitedCount();
+  }
+
+  hideVisitedEl.addEventListener('change', () => {
+    hideVisited = hideVisitedEl.checked;
+    saveState();
+    renderStream();
+    renderGrouped();
+  });
+
+  function updateVisitedCount() {
+    if (!state.results.length) { visitedCountEl.textContent = ''; return; }
+    const n = state.results.filter(r => isVisited(r.url || r.input)).length;
+    visitedCountEl.textContent = n ? `(${n}/${state.results.length})` : '';
   }
 
   urlsEl.addEventListener('input', () => { updateUrlCount(); updateWarning(); saveState(); });
@@ -282,11 +326,14 @@
   }
 
   clearBtn.addEventListener('click', () => {
-    if (!confirm('Clear all URLs, results, and settings?')) return;
+    if (!confirm('Clear all URLs, results, settings, and visited progress?')) return;
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(VISITED_KEY);
+    visited.clear();
     urlsEl.value = '';
     optRedirects.checked = true; optVar.checked = false;
     optUnique.checked = false; optAdvanced.checked = false;
+    hideVisited = false; hideVisitedEl.checked = false;
     timerEl.textContent = '0.0s';
     checkedCountEl.textContent = '0';
     dupNotice.classList.add('hidden'); warningEl.classList.add('hidden');
@@ -295,6 +342,7 @@
     stackBar.innerHTML = ''; stackChips.innerHTML = '';
     state.results = []; state.elapsedMs = 0; state.activeFilter = null;
     updateUrlCount();
+    updateVisitedCount();
   });
 
   viewToggle.addEventListener('click', (e) => {
@@ -363,6 +411,7 @@
     renderStream();
     renderGrouped();
     renderChart();
+    updateVisitedCount();
   }
 
   function renderStackBar() {
@@ -407,9 +456,48 @@
   }
 
   function matchesFilter(r) {
+    if (hideVisited && isVisited(r.url || r.input)) return false;
     if (!state.activeFilter) return true;
     if (state.activeFilter === 'unique') return !!r.uniqueRedirect;
     return r.category === state.activeFilter;
+  }
+
+  const CHECK_SVG = '<svg viewBox="0 0 16 16" width="9" height="9" aria-hidden="true"><path d="M3 8l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function makeVisitToggle(url, onChange) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'visit-toggle';
+    btn.setAttribute('aria-label', 'Mark as visited');
+    btn.title = 'Mark as visited';
+    updateVisitToggle(btn, isVisited(url));
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const next = !isVisited(url);
+      markVisited(url, next);
+      updateVisitToggle(btn, next);
+      if (typeof onChange === 'function') onChange();
+    });
+    return btn;
+  }
+  function updateVisitToggle(btn, on) {
+    btn.classList.toggle('on', !!on);
+    btn.innerHTML = on ? CHECK_SVG : '';
+    btn.title = on ? 'Mark as not visited' : 'Mark as visited';
+  }
+
+  function updateGroupHeaderCounts() {
+    const heads = groupedView.querySelectorAll('.group-card');
+    heads.forEach(card => {
+      const cat = card.dataset.cat;
+      const items = state.results.filter(r =>
+        cat === 'unique' ? !!r.uniqueRedirect : r.category === cat
+      );
+      const done = items.filter(r => isVisited(r.url || r.input)).length;
+      const counter = card.querySelector('.gcount');
+      if (counter) counter.textContent = done ? `${items.length} · ${done} done` : String(items.length);
+    });
   }
 
   function renderStream() {
@@ -425,6 +513,8 @@
   function buildRow(r) {
     const row = document.createElement('div');
     row.className = `row cat-${r.category}`;
+    const url = r.url || r.input;
+    if (isVisited(url)) row.classList.add('visited');
 
     const bar = document.createElement('div'); bar.className = 'bar';
     row.appendChild(bar);
@@ -433,9 +523,28 @@
 
     const urlLine = document.createElement('div');
     urlLine.className = 'url-line';
+
+    const toggle = makeVisitToggle(url, () => {
+      row.classList.toggle('visited', isVisited(url));
+      updateVisitedCount();
+      if (hideVisited) renderStream();
+      // refresh group counters in case grouped view is open later
+      updateGroupHeaderCounts();
+    });
+    urlLine.appendChild(toggle);
+
     const a = document.createElement('a');
-    a.href = r.url || r.input; a.target = '_blank'; a.rel = 'noopener';
-    a.textContent = r.url || r.input;
+    a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = url;
+    a.addEventListener('click', () => {
+      if (!isVisited(url)) {
+        markVisited(url, true);
+        row.classList.add('visited');
+        updateVisitToggle(toggle, true);
+        updateVisitedCount();
+        updateGroupHeaderCounts();
+      }
+    });
     urlLine.appendChild(a);
     if (r.uniqueRedirect) {
       const u = document.createElement('span'); u.className = 'uniq-badge'; u.textContent = 'UNIQUE';
@@ -523,34 +632,93 @@
     card.className = 'group-card';
     card.dataset.cat = cat.key;
 
+    const doneCount = () => items.filter(r => isVisited(r.url || r.input)).length;
+
     const head = document.createElement('div');
     head.className = 'group-head';
-    head.innerHTML = `<div class="group-title"><span class="gdot"></span>${cat.label}<span class="gcount">${items.length}</span></div>`;
+    const initialDone = doneCount();
+    head.innerHTML = `<div class="group-title"><span class="gdot"></span>${cat.label}<span class="gcount">${initialDone ? `${items.length} · ${initialDone} done` : items.length}</span></div>`;
 
-    const copy = document.createElement('button');
-    copy.className = 'copy-btn';
-    copy.textContent = 'Copy';
-    copy.addEventListener('click', async () => {
-      const text = items.map(i => i.url || i.input).join('\n');
-      try {
-        await navigator.clipboard.writeText(text);
-        copy.classList.add('copied'); copy.textContent = 'Copied';
-        setTimeout(() => { copy.classList.remove('copied'); copy.textContent = 'Copy'; }, 1300);
-      } catch (e) { alert('Copy failed'); }
+    const actions = document.createElement('div');
+    actions.className = 'group-actions';
+
+    const copyAll = document.createElement('button');
+    copyAll.className = 'copy-btn';
+    copyAll.textContent = 'Copy';
+    copyAll.addEventListener('click', () => copyList(copyAll, items.map(i => i.url || i.input), 'Copy'));
+    actions.appendChild(copyAll);
+
+    const copyLeft = document.createElement('button');
+    copyLeft.className = 'copy-btn copy-left';
+    copyLeft.textContent = 'Copy left';
+    copyLeft.title = 'Copy URLs not yet marked visited';
+    const refreshCopyLeft = () => {
+      const left = items.filter(r => !isVisited(r.url || r.input));
+      copyLeft.classList.toggle('hidden', left.length === 0 || left.length === items.length);
+    };
+    copyLeft.addEventListener('click', () => {
+      const left = items.filter(r => !isVisited(r.url || r.input)).map(i => i.url || i.input);
+      copyList(copyLeft, left, 'Copy left');
     });
-    head.appendChild(copy);
+    actions.appendChild(copyLeft);
+    refreshCopyLeft();
+
+    head.appendChild(actions);
     card.appendChild(head);
 
     const rows = document.createElement('div'); rows.className = 'group-rows';
     for (const r of items) {
+      const url = r.url || r.input;
+      const rowEl = document.createElement('div');
+      rowEl.className = 'group-row';
+      if (isVisited(url)) rowEl.classList.add('visited');
+
+      const toggle = makeVisitToggle(url, () => {
+        rowEl.classList.toggle('visited', isVisited(url));
+        const counter = card.querySelector('.gcount');
+        const d = doneCount();
+        if (counter) counter.textContent = d ? `${items.length} · ${d} done` : String(items.length);
+        refreshCopyLeft();
+        updateVisitedCount();
+        if (hideVisited) {
+          rowEl.classList.toggle('hidden', isVisited(url));
+        }
+      });
+      rowEl.appendChild(toggle);
+
       const a = document.createElement('a');
-      a.className = 'group-row';
-      a.href = r.url || r.input; a.target = '_blank'; a.rel = 'noopener';
-      a.textContent = r.url || r.input;
-      rows.appendChild(a);
+      a.className = 'group-link';
+      a.href = url; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = url;
+      a.addEventListener('click', () => {
+        if (!isVisited(url)) {
+          markVisited(url, true);
+          rowEl.classList.add('visited');
+          updateVisitToggle(toggle, true);
+          const counter = card.querySelector('.gcount');
+          const d = doneCount();
+          if (counter) counter.textContent = d ? `${items.length} · ${d} done` : String(items.length);
+          refreshCopyLeft();
+          updateVisitedCount();
+          if (hideVisited) rowEl.classList.add('hidden');
+        }
+      });
+      rowEl.appendChild(a);
+
+      if (hideVisited && isVisited(url)) rowEl.classList.add('hidden');
+      rows.appendChild(rowEl);
     }
     card.appendChild(rows);
     return card;
+  }
+
+  async function copyList(btn, urls, baseLabel) {
+    if (!urls.length) { return; }
+    try {
+      await navigator.clipboard.writeText(urls.join('\n'));
+      btn.classList.add('copied'); btn.textContent = 'Copied';
+      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = baseLabel; }, 1300);
+    } catch (e) { alert('Copy failed'); }
   }
 
   function renderChart() {

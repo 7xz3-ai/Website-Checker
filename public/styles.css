@@ -424,6 +424,11 @@ textarea#urls::placeholder { color: var(--dim); }
   background: #fff;
   color: #000;
 }
+.view-row-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
 .filter-hint {
   font-size: 12px;
   color: var(--muted);
@@ -434,6 +439,44 @@ textarea#urls::placeholder { color: var(--dim); }
   text-decoration: underline;
   cursor: pointer;
 }
+
+.hv-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.hv-toggle input { display: none; }
+.hv-toggle .hv-box {
+  width: 14px; height: 14px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border-2);
+  background: #000;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.hv-toggle input:checked + .hv-box {
+  background: var(--up);
+  border-color: var(--up);
+}
+.hv-toggle input:checked + .hv-box::after {
+  content: "";
+  width: 4px; height: 7px;
+  border: solid #001a0e;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.hv-toggle input:checked ~ .hv-text { color: #fff; }
+.hv-toggle .hv-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.hv-toggle:hover .hv-box { border-color: var(--border-strong); }
 
 /* STREAM VIEW (compact rows) */
 .stream-view {
@@ -457,6 +500,11 @@ textarea#urls::placeholder { color: var(--dim); }
 .row:hover { background: var(--panel-3); }
 .row.row-enter { opacity: 0; transform: translateY(-4px); }
 .row.row-enter.row-enter-active { opacity: 1; transform: translateY(0); transition: opacity 0.25s, transform 0.25s; }
+.row.visited .url-line a { opacity: 0.5; text-decoration: line-through; text-decoration-color: rgba(255,255,255,0.3); }
+.row.visited .detail { opacity: 0.45; }
+.row.visited .vars { opacity: 0.5; }
+.row.visited .pill { opacity: 0.55; }
+.row.visited .bar { opacity: 0.4; }
 .row .bar { height: 100%; min-height: 32px; align-self: stretch; }
 .row.cat-up            .bar { background: var(--up); }
 .row.cat-redirect-up   .bar { background: var(--rup); }
@@ -471,6 +519,27 @@ textarea#urls::placeholder { color: var(--dim); }
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
+}
+.visit-toggle {
+  appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-2);
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.15s, border-color 0.15s, transform 0.05s;
+}
+.visit-toggle:hover { border-color: var(--border-strong); }
+.visit-toggle:active { transform: scale(0.92); }
+.visit-toggle.on {
+  background: var(--up);
+  border-color: var(--up);
 }
 .row .url-line a {
   color: #fff;
@@ -588,6 +657,7 @@ textarea#urls::placeholder { color: var(--dim); }
 .group-card[data-cat="cloudflare"]    .gdot { background: var(--cf); }
 .group-card[data-cat="down"]          .gdot { background: var(--down); }
 
+.group-actions { display: inline-flex; gap: 6px; }
 .copy-btn {
   background: transparent;
   border: 1px solid var(--border-2);
@@ -601,19 +671,35 @@ textarea#urls::placeholder { color: var(--dim); }
 }
 .copy-btn:hover { color: #fff; border-color: var(--border-strong); }
 .copy-btn.copied { color: var(--up); border-color: rgba(34, 209, 114, 0.5); background: rgba(34, 209, 114, 0.08); }
+.copy-btn.copy-left { color: var(--up); border-color: rgba(34, 209, 114, 0.4); background: rgba(34, 209, 114, 0.06); }
+.copy-btn.copy-left:hover { background: rgba(34, 209, 114, 0.12); }
 
 .group-rows { display: flex; flex-direction: column; }
 .group-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   padding: 7px 14px;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   border-top: 1px solid var(--border);
   word-break: break-all;
   color: var(--text);
-  text-decoration: none;
 }
 .group-row:first-child { border-top: none; }
 .group-row:hover { background: var(--panel-3); }
+.group-row .group-link {
+  color: var(--text);
+  text-decoration: none;
+  flex: 1;
+  min-width: 0;
+}
+.group-row.visited .group-link {
+  opacity: 0.5;
+  text-decoration: line-through;
+  text-decoration-color: rgba(255,255,255,0.3);
+}
+.group-row.visited { background: rgba(34, 209, 114, 0.04); }
 
 /* CHART VIEW */
 .chart-view {
