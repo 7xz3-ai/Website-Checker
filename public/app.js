@@ -473,12 +473,32 @@
       stopTimer();
       state.streaming = false;
       showProgressBar(false);
-      if (e.name !== 'AbortError') alert('Check failed: ' + e.message);
+      if (e.name !== 'AbortError') await reportCheckError(e);
     } finally {
       activeAbort = null;
       setRunButton('idle');
     }
   });
+
+  async function reportCheckError(e) {
+    console.error('Check failed', e);
+    let detail = e && (e.message || e.toString()) || 'unknown error';
+    let serverHint = '';
+    try {
+      const probe = await fetch('/api/diag', { cache: 'no-store' });
+      if (probe.ok) {
+        const info = await probe.json();
+        const tail = (info.lastErrors || []).slice(-1)[0];
+        serverHint = `\n\nServer is reachable (Node ${info.node}, up ${info.uptimeSec}s, ${info.rssMb}MB).`;
+        if (tail) serverHint += `\nMost recent server error: ${tail.kind}: ${tail.message}`;
+      } else {
+        serverHint = `\n\nServer responded ${probe.status} on /api/diag.`;
+      }
+    } catch (probeErr) {
+      serverHint = `\n\nServer is unreachable (/api/diag also failed: ${probeErr.message}). The deployment may be restarting or your network connection dropped.`;
+    }
+    alert('Check failed: ' + detail + serverHint);
+  }
 
   function setRunButton(mode) {
     const labelEl = checkBtn.querySelector('.run-label');
@@ -499,6 +519,8 @@
       state.total = msg.total;
       setTallyText(0, msg.total);
       setProgress(0, msg.total);
+    } else if (msg.type === 'ping') {
+      // server keepalive; nothing to do
     } else if (msg.type === 'result') {
       const r = msg.result;
       r._index = msg.index;

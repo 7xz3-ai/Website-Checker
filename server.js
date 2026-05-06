@@ -351,15 +351,27 @@ app.post('/api/check', async (req, res) => {
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Connection', 'keep-alive');
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
+    // Pad the first chunk to defeat proxy/edge response buffers.
+    res.write(' '.repeat(2048) + '\n');
+
     const send = (obj) => {
-      res.write(JSON.stringify(obj) + '\n');
-      if (typeof res.flush === 'function') res.flush();
+      try {
+        res.write(JSON.stringify(obj) + '\n');
+        if (typeof res.flush === 'function') res.flush();
+      } catch (e) { /* socket gone */ }
     };
 
     const startedAt = Date.now();
     send({ type: 'start', total: urls.length, startedAt });
+
+    // Heartbeat so reverse proxies and load balancers don't idle out the
+    // streaming connection during slow batches.
+    const heartbeat = setInterval(() => {
+      send({ type: 'ping', ts: Date.now() });
+    }, 3000);
 
     const concurrency = 8;
     const results = new Array(urls.length);
@@ -375,7 +387,26 @@ app.post('/api/check', async (req, res) => {
       while (!aborted) {
         const i = idx++;
         if (i >= urls.length) return;
-        const r = await checkSingleUrl(urls[i], opts);
+        let r;
+        try {
+          r = await checkSingleUrl(urls[i], opts);
+        } catch (workerErr) {
+          console.error('worker error for', urls[i], workerErr && workerErr.stack || workerErr);
+          r = {
+            input: urls[i],
+            url: urls[i],
+            finalUrl: urls[i],
+            firstStatus: 0,
+            finalStatus: 0,
+            chain: [],
+            redirected: false,
+            timingMs: 0,
+            cloudflareSeen: false,
+            error: 'check failed: ' + (workerErr && workerErr.message || 'unknown'),
+            category: 'down',
+            downReason: 'Check error'
+          };
+        }
         results[i] = r;
         completed++;
         send({ type: 'result', index: i, completed, total: urls.length, result: r });
@@ -384,7 +415,12 @@ app.post('/api/check', async (req, res) => {
 
     const workers = [];
     for (let i = 0; i < Math.min(concurrency, urls.length); i++) workers.push(worker());
-    await Promise.all(workers);
+
+    try {
+      await Promise.all(workers);
+    } finally {
+      clearInterval(heartbeat);
+    }
 
     if (aborted) { res.end(); return; }
 
@@ -409,6 +445,31 @@ app.post('/api/check', async (req, res) => {
 });
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+const lastErrors = [];
+process.on('unhandledRejection', (err) => {
+  console.error('unhandledRejection', err && err.stack || err);
+  lastErrors.push({ at: Date.now(), kind: 'unhandledRejection', message: String(err && err.message || err) });
+  if (lastErrors.length > 20) lastErrors.shift();
+});
+process.on('uncaughtException', (err) => {
+  console.error('uncaughtException', err && err.stack || err);
+  lastErrors.push({ at: Date.now(), kind: 'uncaughtException', message: String(err && err.message || err) });
+  if (lastErrors.length > 20) lastErrors.shift();
+});
+
+app.get('/api/diag', (req, res) => {
+  res.json({
+    ok: true,
+    node: process.version,
+    platform: process.platform,
+    uptimeSec: Math.round(process.uptime()),
+    rssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    pid: process.pid,
+    now: Date.now(),
+    lastErrors: lastErrors.slice(-5)
+  });
+});
 
 if (require.main === module) {
   const port = process.env.PORT || 3000;
