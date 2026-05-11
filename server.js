@@ -32,13 +32,18 @@ const PER_HOST_CONCURRENCY = 2;
 const USER_AGENT = 'Mozilla/5.0 (compatible; SiteStatusChecker/1.0)';
 
 // =============================================================================
-// Production safety: require an auth key in production
+// Production safety: refuse to serve API calls without an auth key in prod.
+// We do NOT exit the process so that platform health-checks succeed and the
+// operator can see a clear "configure me" response instead of a crash loop.
 // =============================================================================
 
-if (NODE_ENV === 'production' && !CHECKER_KEY) {
-  console.error('FATAL: CHECKER_KEY env var is required when NODE_ENV=production.');
-  console.error('Set it on the deployment (e.g. Railway variables) and redeploy.');
-  process.exit(1);
+const AUTH_MISCONFIGURED = (NODE_ENV === 'production' && !CHECKER_KEY);
+if (AUTH_MISCONFIGURED) {
+  console.error('---------------------------------------------------------------');
+  console.error('  CHECKER_KEY env var is REQUIRED in production.');
+  console.error('  All API endpoints will return 503 until it is set.');
+  console.error('  Set CHECKER_KEY to a 16+ character random string and redeploy.');
+  console.error('---------------------------------------------------------------');
 }
 if (CHECKER_KEY && CHECKER_KEY.length < 16) {
   console.error('FATAL: CHECKER_KEY must be at least 16 characters.');
@@ -581,6 +586,9 @@ function constantTimeEq(a, b) {
 }
 
 function requireAuth(req, res, next) {
+  if (AUTH_MISCONFIGURED) {
+    return res.status(503).json({ error: 'service not configured: CHECKER_KEY env var must be set' });
+  }
   if (!CHECKER_KEY) return next(); // local/dev only
   const hdr = req.get('x-checker-key') || '';
   if (!constantTimeEq(hdr, CHECKER_KEY)) {
@@ -624,7 +632,10 @@ app.get('/api/health', (req, res) => {
 
 // Whether auth is required - lets the frontend show a key prompt.
 app.get('/api/auth-required', (req, res) => {
-  res.json({ required: !!CHECKER_KEY });
+  res.json({
+    required: !!CHECKER_KEY,
+    misconfigured: AUTH_MISCONFIGURED
+  });
 });
 
 // Lightweight auth verify - used by the frontend when the user enters a key.

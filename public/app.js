@@ -1140,13 +1140,24 @@
 
   async function bootstrapAuth() {
     let required = false;
+    let misconfigured = false;
     try {
       const r = await fetch('/api/auth-required', { cache: 'no-store' });
       if (r.ok) {
         const j = await r.json();
         required = !!j.required;
+        misconfigured = !!j.misconfigured;
       }
     } catch (e) { /* network down - leave required=false so init still runs */ }
+    if (misconfigured) {
+      // Surface a clear admin-side message; no point letting the user try.
+      const head = document.querySelector('#authModal .modal-head h3');
+      const body = document.querySelector('#authModal .modal-body');
+      if (head) head.textContent = 'Server not yet configured';
+      if (body) body.innerHTML = '<p>The deployment is running but the administrator has not set the <code>CHECKER_KEY</code> environment variable.</p><p class="muted">All API calls will return 503 until this is configured. Set <code>CHECKER_KEY</code> to a 16+ character random string in your hosting platform and redeploy.</p>';
+      showAuthModal();
+      return;
+    }
     if (!required) { hideAuthModal(); return; }
 
     const existing = getAuthKey();
