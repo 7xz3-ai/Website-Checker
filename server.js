@@ -45,8 +45,8 @@ if (AUTH_MISCONFIGURED) {
   console.error('  Set CHECKER_KEY to a 16+ character random string and redeploy.');
   console.error('---------------------------------------------------------------');
 }
-if (CHECKER_KEY && CHECKER_KEY.length < 16) {
-  console.error('FATAL: CHECKER_KEY must be at least 16 characters.');
+if (CHECKER_KEY && CHECKER_KEY.length < 6) {
+  console.error('FATAL: CHECKER_KEY must be at least 6 characters.');
   process.exit(1);
 }
 
@@ -617,6 +617,18 @@ const checkLimiter = rateLimit({
   message: { error: 'too many checks, slow down' }
 });
 
+// Strict brute-force lockout on the sign-in endpoint. Counts only failures
+// so a legitimate user's repeated successful pings (verify-on-load) don't
+// burn through the budget.
+const authVerifyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'too many sign-in attempts, wait a minute' }
+});
+
 // Apply to all API surfaces.
 app.use('/api/', apiLimiter);
 
@@ -639,7 +651,7 @@ app.get('/api/auth-required', (req, res) => {
 });
 
 // Lightweight auth verify - used by the frontend when the user enters a key.
-app.post('/api/auth-verify', requireAuth, (req, res) => {
+app.post('/api/auth-verify', authVerifyLimiter, requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
