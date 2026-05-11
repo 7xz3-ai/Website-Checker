@@ -140,6 +140,24 @@
 
 </main>
 
+<div id="authModal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-backdrop"></div>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>Access key required</h3>
+    </div>
+    <div class="modal-body">
+      <p>This deployment is protected. Enter the access key provided by your administrator.</p>
+      <div class="add-site-row">
+        <input id="authKeyInput" type="password" autocomplete="off" placeholder="Access key" />
+        <button id="authKeySubmit" class="copy-btn">Sign in</button>
+      </div>
+      <p id="authKeyErr" class="muted hidden" style="color:#ff5470">Invalid key. Please try again.</p>
+      <p class="muted">The key is stored in your browser session only and is never written to disk.</p>
+    </div>
+  </div>
+</div>
+
 <div id="howModal" class="modal hidden" role="dialog" aria-modal="true">
   <div class="modal-backdrop"></div>
   <div class="modal-card">

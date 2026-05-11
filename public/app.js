@@ -1,4 +1,47 @@
 (() => {
+  // =========================================================================
+  // Auth
+  // =========================================================================
+  const AUTH_SESSION_KEY = 'site-checker-key-v1';
+  function getAuthKey() {
+    try { return sessionStorage.getItem(AUTH_SESSION_KEY) || ''; } catch (e) { return ''; }
+  }
+  function setAuthKey(v) {
+    try {
+      if (v) sessionStorage.setItem(AUTH_SESSION_KEY, v);
+      else sessionStorage.removeItem(AUTH_SESSION_KEY);
+    } catch (e) {}
+  }
+  function authHeaders() {
+    const k = getAuthKey();
+    return k ? { 'x-checker-key': k } : {};
+  }
+  // All API calls go through here so we never forget the auth header.
+  async function api(path, init) {
+    const opts = init || {};
+    const headers = Object.assign({}, opts.headers || {}, authHeaders());
+    const resp = await fetch(path, Object.assign({}, opts, { headers, credentials: 'same-origin' }));
+    return resp;
+  }
+
+  // =========================================================================
+  // Safe URL helpers (defence in depth - server also enforces these)
+  // =========================================================================
+  function safeHttpHref(value) {
+    if (typeof value !== 'string') return '';
+    const v = value.trim();
+    if (!v) return '';
+    // Reject anything that isn't an http(s) absolute URL.
+    try {
+      const u = new URL(v);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+      if (u.username || u.password) return '';
+      return u.toString();
+    } catch (e) {
+      return '';
+    }
+  }
+
   const $ = (id) => document.getElementById(id);
   const urlsEl = $('urls');
   const urlCountEl = $('urlCount');
@@ -210,9 +253,15 @@
     saveNotes();
   });
   addSiteBtn.addEventListener('click', () => {
-    const v = (addSiteInput.value || '').trim();
+    let v = (addSiteInput.value || '').trim();
     if (!v) return;
-    addSiteToNotes(v, null);
+    if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+    const safe = safeHttpHref(v);
+    if (!safe) {
+      alert('Please enter a valid http:// or https:// URL.');
+      return;
+    }
+    addSiteToNotes(safe, null);
     addSiteInput.value = '';
     renderNotes();
     refreshAllRowsNoteState();
@@ -280,7 +329,10 @@
 
     const link = document.createElement('a');
     link.className = 'saved-site-url';
-    link.href = s.url; link.target = '_blank'; link.rel = 'noopener';
+    const safeHref = safeHttpHref(s.url);
+    if (safeHref) {
+      link.href = safeHref; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    }
     link.textContent = s.url;
     head.appendChild(link);
 
@@ -429,12 +481,17 @@
     activeAbort = new AbortController();
 
     try {
-      const res = await fetch('/api/check', {
+      const res = await api('/api/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ urls: unique, ...getOpts() }),
         signal: activeAbort.signal
       });
+      if (res.status === 401) {
+        setAuthKey('');
+        showAuthModal();
+        throw new Error('Unauthorized - please re-enter your access key.');
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
@@ -485,17 +542,14 @@
     let detail = e && (e.message || e.toString()) || 'unknown error';
     let serverHint = '';
     try {
-      const probe = await fetch('/api/diag', { cache: 'no-store' });
+      const probe = await fetch('/api/health', { cache: 'no-store' });
       if (probe.ok) {
-        const info = await probe.json();
-        const tail = (info.lastErrors || []).slice(-1)[0];
-        serverHint = `\n\nServer is reachable (Node ${info.node}, up ${info.uptimeSec}s, ${info.rssMb}MB).`;
-        if (tail) serverHint += `\nMost recent server error: ${tail.kind}: ${tail.message}`;
+        serverHint = '\n\nServer is reachable.';
       } else {
-        serverHint = `\n\nServer responded ${probe.status} on /api/diag.`;
+        serverHint = `\n\nServer responded ${probe.status} on /api/health.`;
       }
     } catch (probeErr) {
-      serverHint = `\n\nServer is unreachable (/api/diag also failed: ${probeErr.message}). The deployment may be restarting or your network connection dropped.`;
+      serverHint = `\n\nServer is unreachable. The deployment may be restarting or your network connection dropped.`;
     }
     alert('Check failed: ' + detail + serverHint);
   }
@@ -800,7 +854,8 @@
     urlLine.appendChild(toggle);
 
     const a = document.createElement('a');
-    a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    const aHref = safeHttpHref(url);
+    if (aHref) { a.href = aHref; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
     a.textContent = url;
     a.addEventListener('click', () => {
       if (!isVisited(url)) {
@@ -829,7 +884,8 @@
       for (const v of r.variations) {
         const vb = document.createElement('a');
         vb.className = `vbadge ${v.category || 'down'}`;
-        vb.href = v.url; vb.target = '_blank'; vb.rel = 'noopener';
+        const vbHref = safeHttpHref(v.url);
+        if (vbHref) { vb.href = vbHref; vb.target = '_blank'; vb.rel = 'noopener noreferrer'; }
         vb.title = `${v.url}\n${CAT_LABEL[v.category] || v.category} (${v.status || 'ERR'})`;
         vb.innerHTML = `<span class="vd"></span>${shortVariant(v.url)}`;
         vw.appendChild(vb);
@@ -866,7 +922,12 @@
     }
     if (r.finalUrl && r.finalUrl !== r.url) {
       const suffix = r.finalStatus ? ` (${r.finalStatus})` : '';
-      out.push(`<br/><span class="arr">&rarr;</span><a href="${escapeAttr(r.finalUrl)}" target="_blank" rel="noopener">${escapeHtml(r.finalUrl)}</a>${suffix}`);
+      const safeFinal = safeHttpHref(r.finalUrl);
+      if (safeFinal) {
+        out.push(`<br/><span class="arr">&rarr;</span><a href="${escapeAttr(safeFinal)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.finalUrl)}</a>${suffix}`);
+      } else {
+        out.push(`<br/><span class="arr">&rarr;</span>${escapeHtml(r.finalUrl)}${suffix}`);
+      }
     }
     return out.join('');
   }
@@ -962,7 +1023,8 @@
 
       const a = document.createElement('a');
       a.className = 'group-link';
-      a.href = url; a.target = '_blank'; a.rel = 'noopener';
+      const aHref = safeHttpHref(url);
+      if (aHref) { a.href = aHref; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
       a.textContent = url;
       a.addEventListener('click', () => {
         if (!isVisited(url)) {
@@ -1061,5 +1123,73 @@
   }
   function escapeAttr(s) { return escapeHtml(s); }
 
+  // =========================================================================
+  // Auth modal wiring
+  // =========================================================================
+  const authModal = $('authModal');
+  const authKeyInput = $('authKeyInput');
+  const authKeySubmit = $('authKeySubmit');
+  const authKeyErr = $('authKeyErr');
+
+  function showAuthModal() {
+    authKeyErr.classList.add('hidden');
+    authModal.classList.remove('hidden');
+    setTimeout(() => authKeyInput.focus(), 50);
+  }
+  function hideAuthModal() { authModal.classList.add('hidden'); }
+
+  async function bootstrapAuth() {
+    let required = false;
+    try {
+      const r = await fetch('/api/auth-required', { cache: 'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        required = !!j.required;
+      }
+    } catch (e) { /* network down - leave required=false so init still runs */ }
+    if (!required) { hideAuthModal(); return; }
+
+    const existing = getAuthKey();
+    if (existing) {
+      // Verify the stored key.
+      try {
+        const r = await fetch('/api/auth-verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-checker-key': existing }
+        });
+        if (r.ok) { hideAuthModal(); return; }
+      } catch (e) { /* ignore */ }
+      setAuthKey('');
+    }
+    showAuthModal();
+  }
+
+  authKeySubmit.addEventListener('click', async () => {
+    const v = (authKeyInput.value || '').trim();
+    if (!v) return;
+    authKeySubmit.disabled = true;
+    try {
+      const r = await fetch('/api/auth-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-checker-key': v }
+      });
+      if (r.ok) {
+        setAuthKey(v);
+        authKeyInput.value = '';
+        authKeyErr.classList.add('hidden');
+        hideAuthModal();
+      } else {
+        authKeyErr.classList.remove('hidden');
+      }
+    } catch (e) {
+      authKeyErr.textContent = 'Network error - try again.';
+      authKeyErr.classList.remove('hidden');
+    } finally {
+      authKeySubmit.disabled = false;
+    }
+  });
+  authKeyInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') authKeySubmit.click(); });
+
   init();
+  bootstrapAuth();
 })();
