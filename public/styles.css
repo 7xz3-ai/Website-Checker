@@ -231,6 +231,15 @@ textarea#urls::placeholder { color: var(--dim); }
 }
 .clear-btn:hover { background: rgba(255, 84, 112, 0.1); border-color: rgba(255, 84, 112, 0.55); }
 
+.clean-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  font-size: 13px;
+  border-radius: 10px;
+}
+
 .banner {
   margin-top: 12px;
   padding: 8px 12px;

@@ -27,6 +27,45 @@
   // =========================================================================
   // Safe URL helpers (defence in depth - server also enforces these)
   // =========================================================================
+  // Extracts URLs from arbitrary pasted text. Tolerant of prose, markdown,
+  // chat exports, etc. Drops emails, version strings, and obviously bad tokens.
+  function extractUrls(text) {
+    if (typeof text !== 'string' || !text) return [];
+    const out = [];
+    const seen = new Set();
+    // Markdown link [label](url) -> keep url
+    text = text.replace(/\[[^\]]*\]\(([^)\s]+)\)/g, ' $1 ');
+    // Split on whitespace and a few separators almost never seen inside URLs
+    const tokens = text.split(/[\s,;<>|`"]+/);
+    for (let t of tokens) {
+      if (!t) continue;
+      // Strip wrapping/trailing punctuation that hangs on URLs in prose
+      t = t.replace(/^[(\[{<'"]+/, '').replace(/[.,;:!?'")\]\}>]+$/, '');
+      if (!t || t.length < 4) continue;
+      if (t.includes('@')) continue;                 // emails
+      if (/^mailto:/i.test(t)) continue;
+      if (/^tel:/i.test(t)) continue;
+      if (/^[\d.]+$/.test(t)) continue;              // 1.2.3 version-style
+      let candidate = t;
+      const isAbsolute = /^https?:\/\//i.test(candidate);
+      if (!isAbsolute) {
+        // Bare domain or domain/path: must contain a dot and end with a TLD-like label
+        if (!/^(?:[a-z0-9][a-z0-9-]*\.)+[a-z]{2,24}(?::\d+)?(?:\/.*)?$/i.test(candidate)) continue;
+      } else {
+        // For absolute URLs, demand at least one dot in the host
+        try {
+          const u = new URL(candidate);
+          if (!u.hostname.includes('.')) continue;
+        } catch (e) { continue; }
+      }
+      const key = candidate.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(candidate);
+    }
+    return out;
+  }
+
   function safeHttpHref(value) {
     if (typeof value !== 'string') return '';
     const v = value.trim();
@@ -51,6 +90,7 @@
   const optAdvanced = $('optAdvanced');
   const checkBtn = $('checkBtn');
   const clearBtn = $('clearBtn');
+  const cleanBtn = $('cleanBtn');
   const timerEl = $('timer');
   const checkedCountEl = $('checkedCount');
   const warningEl = $('warning');
@@ -619,6 +659,25 @@
   function showProgressBar(on) {
     progressBar.classList.toggle('hidden', !on);
   }
+
+  cleanBtn.addEventListener('click', () => {
+    const before = urlsEl.value || '';
+    const beforeLineCount = before.split(/\r?\n/).filter(s => s.trim().length).length;
+    const urls = extractUrls(before);
+    if (!urls.length) {
+      dupNotice.textContent = 'No URLs found in the pasted text.';
+      dupNotice.classList.remove('hidden');
+      return;
+    }
+    urlsEl.value = urls.join('\n');
+    updateUrlCount();
+    updateWarning();
+    saveState();
+    const noise = Math.max(0, beforeLineCount - urls.length);
+    dupNotice.textContent = `Extracted ${urls.length} URL${urls.length === 1 ? '' : 's'}` +
+      (noise > 0 ? ` (cleaned ${noise} non-URL line${noise === 1 ? '' : 's'}).` : '.');
+    dupNotice.classList.remove('hidden');
+  });
 
   clearBtn.addEventListener('click', () => {
     if (!confirm('Clear all URLs, results, settings, and visited progress?')) return;
