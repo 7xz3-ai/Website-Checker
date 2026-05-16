@@ -1004,6 +1004,64 @@
     } catch (e) { return u; }
   }
 
+  // Distinct from the category palette: amber, pink, sky, lime, salmon, cyan, magenta, slate.
+  const CLUSTER_PALETTE = ['#fbbf24', '#f472b6', '#60a5fa', '#a3e635', '#fb923c', '#22d3ee', '#e879f9', '#94a3b8'];
+  function hashStr(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
+  // Pre-pass: which final destinations appear more than once in this group.
+  // Only multi-row clusters get a color so single redirects stay clutter-free.
+  function computeClusterColors(items) {
+    const counts = new Map();
+    for (const r of items) {
+      if (!r || !r.redirected || !r.finalUrl) continue;
+      const k = visitedKey(r.finalUrl);
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    const colors = new Map();
+    for (const [k, n] of counts) {
+      if (n > 1) colors.set(k, CLUSTER_PALETTE[hashStr(k) % CLUSTER_PALETTE.length]);
+    }
+    return colors;
+  }
+
+  const CHEVRON_SVG = '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function formatGroupRowDetail(r, clusterColor) {
+    const parts = [];
+    parts.push('<div class="dt-chain">');
+    parts.push(`HTTP ${r.firstStatus || 0}`);
+    if (r.chain && r.chain.length) {
+      for (const hop of r.chain) {
+        parts.push(`<span class="dt-arr">&rarr;</span>${hop && hop.status ? hop.status : 'redirect'}`);
+      }
+    }
+    if (r.finalStatus && r.finalStatus !== r.firstStatus) {
+      const cf = r.cloudflareSeen ? ' <span class="dt-cf">(Cloudflare)</span>' : '';
+      parts.push(`<span class="dt-arr">&rarr;</span>HTTP ${r.finalStatus}${cf}`);
+    } else if (r.cloudflareSeen && r.firstStatus === r.finalStatus) {
+      parts.push(' <span class="dt-cf">(Cloudflare)</span>');
+    }
+    if (r.timingMs != null) parts.push(`<span class="dt-ms"> &middot; ${r.timingMs}ms</span>`);
+    parts.push('</div>');
+
+    if (r.finalUrl && r.finalUrl !== r.url) {
+      const safe = safeHttpHref(r.finalUrl);
+      const dot = clusterColor ? `<span class="cluster-dot" style="background:${clusterColor}"></span>` : '';
+      if (safe) {
+        parts.push(`<div class="dt-final">${dot}<span class="dt-label">Final:</span> <a href="${escapeAttr(safe)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.finalUrl)}</a></div>`);
+      } else {
+        parts.push(`<div class="dt-final">${dot}<span class="dt-label">Final:</span> ${escapeHtml(r.finalUrl)}</div>`);
+      }
+    }
+    if (r.downReason && !isGenericReason(r.downReason)) {
+      parts.push(`<div class="dt-reason">${escapeHtml(r.downReason)}</div>`);
+    }
+    return parts.join('');
+  }
+
   function renderGrouped() {
     groupedView.innerHTML = '';
     let any = false;
@@ -1060,25 +1118,38 @@
     head.appendChild(actions);
     card.appendChild(head);
 
+    const clusterColors = computeClusterColors(items);
+
     const rows = document.createElement('div'); rows.className = 'group-rows';
     for (const r of items) {
       const url = r.url || r.input;
+      const wrap = document.createElement('div');
+      wrap.className = 'group-row-wrap';
+      if (isVisited(url)) wrap.classList.add('visited');
+
       const rowEl = document.createElement('div');
       rowEl.className = 'group-row';
-      if (isVisited(url)) rowEl.classList.add('visited');
 
       const toggle = makeVisitToggle(url, () => {
-        rowEl.classList.toggle('visited', isVisited(url));
+        wrap.classList.toggle('visited', isVisited(url));
         const counter = card.querySelector('.gcount');
         const d = doneCount();
         if (counter) counter.textContent = d ? `${items.length} · ${d} done` : String(items.length);
         refreshCopyLeft();
         updateVisitedCount();
-        if (hideVisited) {
-          rowEl.classList.toggle('hidden', isVisited(url));
-        }
+        if (hideVisited) wrap.classList.toggle('hidden', isVisited(url));
       });
       rowEl.appendChild(toggle);
+
+      const clusterKey = (r.redirected && r.finalUrl) ? visitedKey(r.finalUrl) : null;
+      const clusterColor = clusterKey ? clusterColors.get(clusterKey) : null;
+      if (clusterColor) {
+        const dot = document.createElement('span');
+        dot.className = 'cluster-dot';
+        dot.style.background = clusterColor;
+        dot.title = 'Same redirect destination as other rows in this group';
+        rowEl.appendChild(dot);
+      }
 
       const a = document.createElement('a');
       a.className = 'group-link';
@@ -1088,21 +1159,51 @@
       a.addEventListener('click', () => {
         if (!isVisited(url)) {
           markVisited(url, true);
-          rowEl.classList.add('visited');
+          wrap.classList.add('visited');
           updateVisitToggle(toggle, true);
           const counter = card.querySelector('.gcount');
           const d = doneCount();
           if (counter) counter.textContent = d ? `${items.length} · ${d} done` : String(items.length);
           refreshCopyLeft();
           updateVisitedCount();
-          if (hideVisited) rowEl.classList.add('hidden');
+          if (hideVisited) wrap.classList.add('hidden');
         }
       });
       rowEl.appendChild(a);
       rowEl.appendChild(makeNoteToggle(r));
 
-      if (hideVisited && isVisited(url)) rowEl.classList.add('hidden');
-      rows.appendChild(rowEl);
+      const hasDetail = (r.redirected && (r.chain && r.chain.length))
+        || (r.finalUrl && r.finalUrl !== r.url)
+        || (r.downReason && !isGenericReason(r.downReason))
+        || r.cloudflareSeen;
+
+      if (hasDetail) {
+        const expand = document.createElement('button');
+        expand.type = 'button';
+        expand.className = 'expand-toggle';
+        expand.setAttribute('aria-label', 'Show redirect details');
+        expand.setAttribute('aria-expanded', 'false');
+        expand.title = 'Show redirect details';
+        expand.innerHTML = CHEVRON_SVG;
+        const detail = document.createElement('div');
+        detail.className = 'group-row-detail hidden';
+        detail.innerHTML = formatGroupRowDetail(r, clusterColor);
+        expand.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const open = detail.classList.toggle('hidden') === false;
+          expand.classList.toggle('open', open);
+          expand.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+        rowEl.appendChild(expand);
+        wrap.appendChild(rowEl);
+        wrap.appendChild(detail);
+      } else {
+        wrap.appendChild(rowEl);
+      }
+
+      if (hideVisited && isVisited(url)) wrap.classList.add('hidden');
+      rows.appendChild(wrap);
     }
     card.appendChild(rows);
     return card;
