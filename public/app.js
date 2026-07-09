@@ -445,6 +445,17 @@
     renderGrouped();
   });
 
+  const deselectAllBtn = $('deselectAllBtn');
+  deselectAllBtn.addEventListener('click', () => {
+    if (!visited.size) return;
+    if (!confirm('Clear all visited checkmarks?')) return;
+    visited.clear();
+    saveVisited();
+    updateVisitedCount();
+    renderStream();
+    renderGrouped();
+  });
+
   function updateVisitedCount() {
     if (!state.results.length) { visitedCountEl.textContent = ''; return; }
     const n = state.results.filter(r => isVisited(r.url || r.input)).length;
