@@ -256,7 +256,45 @@ textarea#urls::placeholder { color: var(--dim); }
   color: var(--muted);
   border: 1px solid var(--border-2);
 }
+.banner.notice a[data-recheck] {
+  color: var(--rup);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.history-bar {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.history-text { color: var(--dim); }
+.link-btn {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+.link-btn:hover { color: #fff; }
 .hidden { display: none !important; }
+
+/* CACHED badge - shared by stream + grouped rows */
+.cached-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--rup);
+  background: rgba(20, 210, 196, 0.12);
+  border: 1px solid rgba(20, 210, 196, 0.4);
+  padding: 1px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
 
 /* RESULTS CARD */
 .results-card {

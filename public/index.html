@@ -51,6 +51,11 @@
         <span class="dot"></span>
         <span class="opt-text">Advanced (10 hops)</span>
       </label>
+      <label class="toggle" data-key="skipChecked" title="Skip URLs already checked in a previous run, even after clearing and re-pasting">
+        <input type="checkbox" id="optSkipChecked" checked />
+        <span class="dot"></span>
+        <span class="opt-text">Skip previously-checked</span>
+      </label>
     </div>
 
     <div class="run-row">
@@ -70,6 +75,10 @@
 
     <div id="warning" class="banner warning hidden">200+ URLs detected &mdash; this may take a while.</div>
     <div id="dupNotice" class="banner notice hidden"></div>
+    <div id="historyBar" class="history-bar hidden">
+      <span id="historyText" class="history-text"></span>
+      <button id="forgetHistoryBtn" class="link-btn" title="Erase the remembered check history">Forget history</button>
+    </div>
   </section>
 
   <section id="resultsCard" class="results-card hidden">

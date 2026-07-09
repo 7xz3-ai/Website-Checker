@@ -124,10 +124,91 @@
   const exportNotesBtn = $('exportNotesBtn');
   const clearNotesBtn = $('clearNotesBtn');
   const notesBadge = $('notesBadge');
+  const optSkipChecked = $('optSkipChecked');
+  const historyBar = $('historyBar');
+  const historyText = $('historyText');
+  const forgetHistoryBtn = $('forgetHistoryBtn');
 
   const STORAGE_KEY = 'site-checker-state-v3';
   const VISITED_KEY = 'site-checker-visited-v1';
   const NOTES_KEY = 'site-checker-notes-v1';
+  const HISTORY_KEY = 'site-checker-history-v1';
+  const MAX_HISTORY = 5000;
+
+  // =========================================================================
+  // Check history - persists which URLs have been checked before, and their
+  // last-known result, so re-pasting a list (even after Clear) can skip the
+  // network round-trip and show the cached status instead.
+  // =========================================================================
+  function historyKey(url) {
+    try {
+      const raw = /^https?:\/\//i.test(url) ? url : 'https://' + String(url).trim();
+      const u = new URL(raw);
+      return u.host.toLowerCase().replace(/^www\./, '') + u.pathname.replace(/\/+$/, '') + (u.search || '');
+    } catch (e) { return String(url || '').trim().toLowerCase(); }
+  }
+  function loadHistory() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(HISTORY_KEY));
+      return (raw && typeof raw === 'object') ? raw : {};
+    } catch (e) { return {}; }
+  }
+  let historySaveTimer = null;
+  function saveHistory(immediate) {
+    const doSave = () => { try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch (e) {} };
+    if (immediate) doSave();
+    else { clearTimeout(historySaveTimer); historySaveTimer = setTimeout(doSave, 300); }
+  }
+  function recordHistory(r) {
+    if (!r || r.cached) return;
+    const url = r.url || r.input;
+    if (!url) return;
+    history[historyKey(url)] = {
+      url: r.url || url,
+      category: r.category || 'down',
+      finalUrl: r.finalUrl || null,
+      firstStatus: r.firstStatus || 0,
+      finalStatus: r.finalStatus || 0,
+      chain: Array.isArray(r.chain) ? r.chain : [],
+      redirected: !!r.redirected,
+      timingMs: r.timingMs != null ? r.timingMs : null,
+      cloudflareSeen: !!r.cloudflareSeen,
+      error: r.error || null,
+      downReason: r.downReason || null,
+      uniqueRedirect: !!r.uniqueRedirect,
+      at: Date.now()
+    };
+  }
+  function pruneHistory() {
+    const keys = Object.keys(history);
+    if (keys.length <= MAX_HISTORY) return;
+    keys.sort((a, b) => (history[a].at || 0) - (history[b].at || 0));
+    for (let i = 0; i < keys.length - MAX_HISTORY; i++) delete history[keys[i]];
+  }
+  function getHistory(url) { return history[historyKey(url)] || null; }
+  function historySize() { return Object.keys(history).length; }
+  // Build a display-ready result object from a stored history record.
+  function cachedResultFrom(rec, pastedInput) {
+    return {
+      input: pastedInput,
+      url: rec.url,
+      finalUrl: rec.finalUrl,
+      firstStatus: rec.firstStatus,
+      finalStatus: rec.finalStatus,
+      chain: rec.chain || [],
+      redirected: rec.redirected,
+      timingMs: rec.timingMs,
+      cloudflareSeen: rec.cloudflareSeen,
+      error: rec.error,
+      category: rec.category,
+      downReason: rec.downReason,
+      uniqueRedirect: rec.uniqueRedirect,
+      cached: true,
+      cachedAt: rec.at
+    };
+  }
+  const history = loadHistory();
+  let forceRecheckNext = false;
 
   function loadVisited() {
     try {
@@ -234,7 +315,7 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         urlsText: urlsEl.value,
-        opts: getOpts(),
+        opts: { ...getOpts(), skipChecked: optSkipChecked.checked },
         results: state.results,
         elapsedMs: state.elapsedMs,
         view: state.view,
@@ -266,6 +347,7 @@
         optVar.checked = !!s.opts.variations;
         optUnique.checked = !!s.opts.unique;
         optAdvanced.checked = !!s.opts.advanced;
+        optSkipChecked.checked = s.opts.skipChecked !== false;
       }
       if (s.view) state.view = s.view;
       if (typeof s.hideVisited === 'boolean') hideVisited = s.hideVisited;
@@ -282,6 +364,7 @@
     updateWarning();
     updateVisitedCount();
     updateNotesBadge();
+    updateHistoryBar();
     if (Object.keys(notes.sites).length || (notes.general && notes.general.length)) {
       resultsCard.classList.remove('hidden');
       if (state.view === 'notes') renderNotes();
@@ -463,7 +546,30 @@
   }
 
   urlsEl.addEventListener('input', () => { updateUrlCount(); updateWarning(); saveState(); });
-  [optRedirects, optVar, optUnique, optAdvanced].forEach(el => el.addEventListener('change', saveState));
+  [optRedirects, optVar, optUnique, optAdvanced, optSkipChecked].forEach(el => el.addEventListener('change', saveState));
+
+  function updateHistoryBar() {
+    const n = historySize();
+    if (!n) { historyBar.classList.add('hidden'); return; }
+    historyBar.classList.remove('hidden');
+    historyText.textContent = `Remembers ${n} previously-checked URL${n === 1 ? '' : 's'}.`;
+  }
+  forgetHistoryBtn.addEventListener('click', () => {
+    const n = historySize();
+    if (!n) return;
+    if (!confirm(`Forget the remembered check history (${n} URL${n === 1 ? '' : 's'})? Future runs will re-check these.`)) return;
+    for (const k of Object.keys(history)) delete history[k];
+    saveHistory(true);
+    updateHistoryBar();
+  });
+  dupNotice.addEventListener('click', (e) => {
+    const link = e.target.closest('a[data-recheck]');
+    if (!link) return;
+    e.preventDefault();
+    if (activeAbort) return; // a run is already in progress
+    forceRecheckNext = true;
+    checkBtn.click();
+  });
 
   function updateUrlCount() {
     urlCountEl.textContent = String(parseUrlLines(urlsEl.value).length);
@@ -504,26 +610,68 @@
   checkBtn.addEventListener('click', async () => {
     if (activeAbort) { activeAbort.abort(); activeAbort = null; return; }
 
+    const force = forceRecheckNext;
+    forceRecheckNext = false;
+
     const lines = parseUrlLines(urlsEl.value);
     if (!lines.length) { alert('Please enter at least one URL.'); return; }
     const { unique, dups } = dedupe(lines);
-    if (dups > 0) {
-      dupNotice.textContent = `Removed ${dups} duplicate URL${dups === 1 ? '' : 's'}.`;
+
+    // Partition into URLs to fetch vs. ones already in the check history.
+    const skipEnabled = optSkipChecked.checked && !force;
+    const toFetch = [];
+    const cachedResults = [];
+    // Position of each URL in the pasted (deduped) order, for stable display.
+    const orderMap = new Map();
+    unique.forEach((u, i) => orderMap.set(historyKey(u), i));
+    for (const u of unique) {
+      const rec = skipEnabled ? getHistory(u) : null;
+      if (rec) {
+        const cr = cachedResultFrom(rec, u);
+        cr._order = orderMap.get(historyKey(u));
+        cachedResults.push(cr);
+      } else {
+        toFetch.push(u);
+      }
+    }
+    state.orderMap = orderMap;
+    state.cachedPending = cachedResults;
+
+    // Build the combined notice (dups + skipped).
+    const noticeParts = [];
+    if (dups > 0) noticeParts.push(`Removed ${dups} duplicate${dups === 1 ? '' : 's'}`);
+    if (cachedResults.length > 0) noticeParts.push(`${dups > 0 ? 's' : 'S'}kipped ${cachedResults.length} previously-checked URL${cachedResults.length === 1 ? '' : 's'} (showing cached)`);
+    if (noticeParts.length) {
+      dupNotice.innerHTML = noticeParts.join(' &middot; ') +
+        (cachedResults.length ? ' &middot; <a data-recheck>Re-check all</a>' : '.');
       dupNotice.classList.remove('hidden');
-    } else dupNotice.classList.add('hidden');
+    } else {
+      dupNotice.classList.add('hidden');
+    }
 
     state.results = [];
     state.activeFilter = null;
     state.streaming = true;
-    state.total = unique.length;
+    state.total = toFetch.length;
     resultsCard.classList.remove('hidden');
     streamView.innerHTML = ''; groupedView.innerHTML = '';
     stackBar.innerHTML = ''; stackChips.innerHTML = '';
-    setTallyText(0, unique.length);
-    setProgress(0, unique.length);
-    showProgressBar(true);
+    setTallyText(0, toFetch.length);
+    setProgress(0, toFetch.length);
     if (state.view !== 'stream') setView('stream');
 
+    // Nothing new to fetch: render cached results immediately, no network call.
+    if (toFetch.length === 0) {
+      state.streaming = false;
+      showProgressBar(false);
+      state.elapsedMs = 0;
+      timerEl.textContent = '0.0s';
+      finalizeRender(true);
+      saveState();
+      return;
+    }
+
+    showProgressBar(true);
     setRunButton('cancel');
 
     const start = Date.now();
@@ -535,7 +683,7 @@
       const res = await api('/api/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: unique, ...getOpts() }),
+        body: JSON.stringify({ urls: toFetch, ...getOpts() }),
         signal: activeAbort.signal
       });
       if (res.status === 401) {
@@ -629,6 +777,7 @@
     } else if (msg.type === 'result') {
       const r = msg.result;
       r._index = msg.index;
+      r._order = state.orderMap ? state.orderMap.get(historyKey(r.url || r.input)) : msg.index;
       state.results.push(r);
       setTallyText(msg.completed, msg.total);
       setProgress(msg.completed, msg.total);
@@ -651,7 +800,24 @@
   }
 
   function finalizeRender(_doneSignaled) {
-    state.results.sort((a, b) => (a._index ?? 0) - (b._index ?? 0));
+    // Persist freshly-fetched results into the check history.
+    for (const r of state.results) {
+      if (!r.cached) recordHistory(r);
+    }
+    // Merge in cached results for URLs we skipped fetching this run.
+    if (Array.isArray(state.cachedPending) && state.cachedPending.length) {
+      state.results.push(...state.cachedPending);
+      state.cachedPending = [];
+    }
+    pruneHistory();
+    saveHistory(true);
+    updateHistoryBar();
+    // Order by pasted position; fall back to server index.
+    state.results.sort((a, b) => {
+      const ao = (a._order != null) ? a._order : (a._index != null ? a._index : 0);
+      const bo = (b._order != null) ? b._order : (b._index != null ? b._index : 0);
+      return ao - bo;
+    });
     renderAll();
   }
 
@@ -941,6 +1107,13 @@
       const u = document.createElement('span'); u.className = 'uniq-badge'; u.textContent = 'UNIQUE';
       urlLine.appendChild(u);
     }
+    if (r.cached) {
+      const c = document.createElement('span');
+      c.className = 'cached-badge';
+      c.textContent = 'CACHED';
+      c.title = 'From a previous run' + (r.cachedAt ? ' · checked ' + timeAgo(r.cachedAt) : '');
+      urlLine.appendChild(c);
+    }
     urlLine.appendChild(makeNoteToggle(r));
     body.appendChild(urlLine);
 
@@ -1181,6 +1354,13 @@
         }
       });
       rowEl.appendChild(a);
+      if (r.cached) {
+        const c = document.createElement('span');
+        c.className = 'cached-badge';
+        c.textContent = 'CACHED';
+        c.title = 'From a previous run' + (r.cachedAt ? ' · checked ' + timeAgo(r.cachedAt) : '');
+        rowEl.appendChild(c);
+      }
       rowEl.appendChild(makeNoteToggle(r));
 
       const hasDetail = (r.redirected && (r.chain && r.chain.length))
