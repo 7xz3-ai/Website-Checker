@@ -133,7 +133,10 @@
   const VISITED_KEY = 'site-checker-visited-v1';
   const NOTES_KEY = 'site-checker-notes-v1';
   const HISTORY_KEY = 'site-checker-history-v1';
-  const MAX_HISTORY = 5000;
+  const MAX_HISTORY = 2000;
+  // A cached verdict older than this is treated as a miss and re-fetched, so a
+  // site that has since recovered is never reported from a stale record.
+  const HISTORY_TTL_MS = 24 * 60 * 60 * 1000;
 
   // =========================================================================
   // Check history - persists which URLs have been checked before, and their
@@ -147,6 +150,12 @@
       return u.host.toLowerCase().replace(/^www\./, '') + u.pathname.replace(/\/+$/, '') + (u.search || '');
     } catch (e) { return String(url || '').trim().toLowerCase(); }
   }
+  // Options that change what a result means. A record checked under different
+  // options is a miss, so toggling variations/advanced re-fetches rather than
+  // serving a verdict computed under the old settings.
+  function optsFingerprint(o) {
+    return [o.redirects ? 'r' : '-', o.variations ? 'v' : '-', o.advanced ? 'a' : '-'].join('');
+  }
   function loadHistory() {
     try {
       const raw = JSON.parse(localStorage.getItem(HISTORY_KEY));
@@ -154,15 +163,37 @@
     } catch (e) { return {}; }
   }
   let historySaveTimer = null;
+  let historyQuotaWarned = false;
   function saveHistory(immediate) {
-    const doSave = () => { try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch (e) {} };
+    const doSave = () => {
+      // Retry on quota failure by dropping the oldest half, so a full store
+      // degrades gracefully instead of silently disabling all persistence
+      // (history shares the origin quota with the saved-state blob).
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); return; }
+        catch (e) {
+          const keys = Object.keys(history);
+          if (!keys.length) return;
+          keys.sort((a, b) => (history[a].at || 0) - (history[b].at || 0));
+          const drop = Math.max(1, Math.floor(keys.length / 2));
+          for (let i = 0; i < drop; i++) delete history[keys[i]];
+          if (!historyQuotaWarned) {
+            historyQuotaWarned = true;
+            console.warn('Check history exceeded browser storage; dropped oldest entries.');
+          }
+        }
+      }
+    };
     if (immediate) doSave();
     else { clearTimeout(historySaveTimer); historySaveTimer = setTimeout(doSave, 300); }
   }
-  function recordHistory(r) {
+  function recordHistory(r, opts) {
     if (!r || r.cached) return;
     const url = r.url || r.input;
     if (!url) return;
+    // Never remember a transport-level failure: those are transient by nature
+    // and caching them would report a recovered site as unreachable.
+    if (r.error) return;
     history[historyKey(url)] = {
       url: r.url || url,
       category: r.category || 'down',
@@ -173,23 +204,37 @@
       redirected: !!r.redirected,
       timingMs: r.timingMs != null ? r.timingMs : null,
       cloudflareSeen: !!r.cloudflareSeen,
-      error: r.error || null,
+      error: null,
       downReason: r.downReason || null,
-      uniqueRedirect: !!r.uniqueRedirect,
+      variations: Array.isArray(r.variations) ? r.variations : null,
+      opts: optsFingerprint(opts || getOpts()),
       at: Date.now()
     };
   }
   function pruneHistory() {
     const keys = Object.keys(history);
-    if (keys.length <= MAX_HISTORY) return;
-    keys.sort((a, b) => (history[a].at || 0) - (history[b].at || 0));
-    for (let i = 0; i < keys.length - MAX_HISTORY; i++) delete history[keys[i]];
+    // Drop expired records first, then bound the total count.
+    const now = Date.now();
+    for (const k of keys) {
+      if (!history[k] || (now - (history[k].at || 0)) > HISTORY_TTL_MS) delete history[k];
+    }
+    const left = Object.keys(history);
+    if (left.length <= MAX_HISTORY) return;
+    left.sort((a, b) => (history[a].at || 0) - (history[b].at || 0));
+    for (let i = 0; i < left.length - MAX_HISTORY; i++) delete history[left[i]];
   }
-  function getHistory(url) { return history[historyKey(url)] || null; }
+  // A record is only usable if it is fresh and was produced under the same options.
+  function getHistory(url, opts) {
+    const rec = history[historyKey(url)];
+    if (!rec) return null;
+    if ((Date.now() - (rec.at || 0)) > HISTORY_TTL_MS) return null;
+    if (rec.opts && rec.opts !== optsFingerprint(opts || getOpts())) return null;
+    return rec;
+  }
   function historySize() { return Object.keys(history).length; }
   // Build a display-ready result object from a stored history record.
   function cachedResultFrom(rec, pastedInput) {
-    return {
+    const out = {
       input: pastedInput,
       url: rec.url,
       finalUrl: rec.finalUrl,
@@ -199,13 +244,15 @@
       redirected: rec.redirected,
       timingMs: rec.timingMs,
       cloudflareSeen: rec.cloudflareSeen,
-      error: rec.error,
+      error: rec.error || null,
       category: rec.category,
       downReason: rec.downReason,
-      uniqueRedirect: rec.uniqueRedirect,
+      uniqueRedirect: false, // recomputed per batch in finalizeRender
       cached: true,
       cachedAt: rec.at
     };
+    if (Array.isArray(rec.variations) && rec.variations.length) out.variations = rec.variations;
+    return out;
   }
   const history = loadHistory();
   let forceRecheckNext = false;
@@ -561,10 +608,20 @@
     for (const k of Object.keys(history)) delete history[k];
     saveHistory(true);
     updateHistoryBar();
+    // Displayed CACHED badges would now reference records that no longer exist.
+    let touched = false;
+    for (const r of state.results) {
+      if (r.cached) { r.cached = false; delete r.cachedAt; touched = true; }
+    }
+    if (touched) { renderStream(); renderGrouped(); saveState(); }
   });
+  function setRecheckLinkEnabled(on) {
+    const link = dupNotice.querySelector('a[data-recheck]');
+    if (link) link.classList.toggle('disabled', !on);
+  }
   dupNotice.addEventListener('click', (e) => {
     const link = e.target.closest('a[data-recheck]');
-    if (!link) return;
+    if (!link || link.classList.contains('disabled')) return;
     e.preventDefault();
     if (activeAbort) return; // a run is already in progress
     forceRecheckNext = true;
@@ -583,7 +640,9 @@
   function dedupe(arr) {
     const seen = new Set(); const unique = []; let dups = 0;
     for (const x of arr) {
-      const key = x.toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      // Same canonicalisation as historyKey so two inputs that share a history
+      // record (e.g. example.com and www.example.com) also collapse to one row.
+      const key = historyKey(x);
       if (seen.has(key)) { dups++; continue; }
       seen.add(key); unique.push(x);
     }
@@ -618,14 +677,16 @@
     const { unique, dups } = dedupe(lines);
 
     // Partition into URLs to fetch vs. ones already in the check history.
+    const runOpts = getOpts();
     const skipEnabled = optSkipChecked.checked && !force;
     const toFetch = [];
     const cachedResults = [];
     // Position of each URL in the pasted (deduped) order, for stable display.
+    // dedupe() already collapsed same-key inputs, so each key appears once.
     const orderMap = new Map();
     unique.forEach((u, i) => orderMap.set(historyKey(u), i));
     for (const u of unique) {
-      const rec = skipEnabled ? getHistory(u) : null;
+      const rec = skipEnabled ? getHistory(u, runOpts) : null;
       if (rec) {
         const cr = cachedResultFrom(rec, u);
         cr._order = orderMap.get(historyKey(u));
@@ -636,15 +697,18 @@
     }
     state.orderMap = orderMap;
     state.cachedPending = cachedResults;
+    state.runOpts = runOpts;
 
     // Build the combined notice (dups + skipped).
     const noticeParts = [];
     if (dups > 0) noticeParts.push(`Removed ${dups} duplicate${dups === 1 ? '' : 's'}`);
-    if (cachedResults.length > 0) noticeParts.push(`${dups > 0 ? 's' : 'S'}kipped ${cachedResults.length} previously-checked URL${cachedResults.length === 1 ? '' : 's'} (showing cached)`);
+    if (cachedResults.length > 0) noticeParts.push(`Skipped ${cachedResults.length} previously-checked URL${cachedResults.length === 1 ? '' : 's'} (showing cached)`);
     if (noticeParts.length) {
       dupNotice.innerHTML = noticeParts.join(' &middot; ') +
         (cachedResults.length ? ' &middot; <a data-recheck>Re-check all</a>' : '.');
       dupNotice.classList.remove('hidden');
+      // The link is a dead click while a run is streaming - hide it until idle.
+      setRecheckLinkEnabled(toFetch.length === 0);
     } else {
       dupNotice.classList.add('hidden');
     }
@@ -729,10 +793,17 @@
       stopTimer();
       state.streaming = false;
       showProgressBar(false);
+      // Even on cancel/failure, merge and render whatever we did get plus the
+      // cached rows - the notice already told the user they would be shown.
+      state.elapsedMs = Date.now() - start;
+      timerEl.textContent = formatElapsed(state.elapsedMs);
+      finalizeRender(false);
+      saveState();
       if (e.name !== 'AbortError') await reportCheckError(e);
     } finally {
       activeAbort = null;
       setRunButton('idle');
+      setRecheckLinkEnabled(true);
     }
   });
 
@@ -802,7 +873,7 @@
   function finalizeRender(_doneSignaled) {
     // Persist freshly-fetched results into the check history.
     for (const r of state.results) {
-      if (!r.cached) recordHistory(r);
+      if (!r.cached) recordHistory(r, state.runOpts);
     }
     // Merge in cached results for URLs we skipped fetching this run.
     if (Array.isArray(state.cachedPending) && state.cachedPending.length) {
@@ -812,6 +883,10 @@
     pruneHistory();
     saveHistory(true);
     updateHistoryBar();
+    // Uniqueness is a property of the whole batch, but the server only saw the
+    // URLs we actually fetched. Recompute over the merged fresh+cached set so
+    // skipped rows count towards a shared destination.
+    recomputeUnique();
     // Order by pasted position; fall back to server index.
     state.results.sort((a, b) => {
       const ao = (a._order != null) ? a._order : (a._index != null ? a._index : 0);
@@ -819,6 +894,23 @@
       return ao - bo;
     });
     renderAll();
+  }
+
+  function recomputeUnique() {
+    const wantUnique = state.runOpts ? state.runOpts.unique : optUnique.checked;
+    if (!wantUnique) {
+      for (const r of state.results) r.uniqueRedirect = false;
+      return;
+    }
+    const counts = new Map();
+    for (const r of state.results) {
+      if (!r.redirected || !r.finalUrl) continue;
+      const k = historyKey(r.finalUrl);
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    for (const r of state.results) {
+      r.uniqueRedirect = !!(r.redirected && r.finalUrl && counts.get(historyKey(r.finalUrl)) === 1);
+    }
   }
 
   function setTallyText(done, total) {
@@ -937,7 +1029,11 @@
     if (!state.results.length) { resultsCard.classList.add('hidden'); return; }
     resultsCard.classList.remove('hidden');
     timerEl.textContent = formatElapsed(state.elapsedMs);
-    checkedCountEl.textContent = String(state.results.length);
+    const cachedCount = state.results.filter(r => r.cached).length;
+    const freshCount = state.results.length - cachedCount;
+    checkedCountEl.innerHTML = cachedCount
+      ? `${freshCount}<span class="of"> +${cachedCount} cached</span>`
+      : String(state.results.length);
     renderStackBar();
     renderChips();
     renderHint();

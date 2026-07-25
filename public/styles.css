@@ -261,6 +261,11 @@ textarea#urls::placeholder { color: var(--dim); }
   text-decoration: underline;
   cursor: pointer;
 }
+.banner.notice a[data-recheck].disabled {
+  opacity: 0.4;
+  cursor: default;
+  text-decoration: none;
+}
 .history-bar {
   margin-top: 10px;
   display: flex;
